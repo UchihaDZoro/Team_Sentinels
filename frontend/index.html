@@ -57,8 +57,8 @@
       <div class="video-launcher-card" id="video-launcher">
         <div class="launcher-header">
           <div class="launcher-title">
-            <span class="pulse-icon">🎯</span>
-            <span>VIDEO FILE SURVEILLANCE FEED <span style="font-size: 10px; background: rgba(0,255,136,0.15); border: 1px solid var(--accent-green); padding: 2px 6px; border-radius: 4px; margin-left: 6px;">YOLO26 NMS-FREE</span></span>
+            <span class="pulse-icon">📡</span>
+            <span>LIVE STREAMS & VIDEO SURVEILLANCE FEED <span style="font-size: 10px; background: rgba(0,255,136,0.15); border: 1px solid var(--accent-green); padding: 2px 6px; border-radius: 4px; margin-left: 6px;">YOLO26 NMS-FREE</span></span>
           </div>
           <div class="legend-badges">
             <span class="legend-badge legend-human">🟩 HUMANS (GREEN BOX)</span>
@@ -69,10 +69,10 @@
 
         <div class="launcher-controls">
           <div class="input-with-icon">
-            <span class="input-icon">📁</span>
+            <span class="input-icon">🔗</span>
             <input type="text" id="quick-filepath-input" 
-              placeholder="Enter or paste video filepath (e.g. D:\CCTron\backend\demo_videos\surveillance_humans_and_cars.mp4)" 
-              value="D:\CCTron\backend\demo_videos\surveillance_humans_and_cars.mp4">
+              placeholder="Paste YouTube link, live stream URL, or local file path (e.g. https://www.youtube.com/watch?v=sKcmQQqzQcM)" 
+              value="https://www.youtube.com/watch?v=sKcmQQqzQcM">
           </div>
           
           <input type="file" id="video-file-input" accept="video/mp4,video/avi,video/mkv,video/mov" style="display:none;">
@@ -88,7 +88,10 @@
         <!-- Quick Preset Demo Video Chips -->
         <div class="demo-chips-row">
           <span class="chips-label">QUICK DEMO PRESETS:</span>
-          <button class="chip-btn active" type="button" onclick="playDemoPreset('surveillance_humans_and_cars.mp4', 'Surveillance (Humans & Cars)')">
+          <button class="chip-btn active" type="button" onclick="playYouTubePreset('https://www.youtube.com/watch?v=sKcmQQqzQcM', 'Winter Garden Live Cam (YouTube)')" style="background: rgba(255,51,75,0.15); border-color: #ff334b; color: #ff6b7d; font-weight: 700;">
+            🔴 YouTube Live Cam
+          </button>
+          <button class="chip-btn" type="button" onclick="playDemoPreset('surveillance_humans_and_cars.mp4', 'Surveillance (Humans & Cars)')">
             👥+🚗 Humans & Cars
           </button>
           <button class="chip-btn" type="button" onclick="playDemoPreset('checkpost_vehicles.mp4', 'Checkpost Vehicles')">
@@ -172,9 +175,9 @@
           <input type="text" id="cam-name" placeholder="e.g. BOP-17 Main Gate">
         </div>
         <div class="form-group">
-          <label for="cam-source">Video Source</label>
-          <input type="text" id="cam-source" placeholder="RTSP URL, video file path, or 0 for webcam">
-          <p class="form-hint">Examples: rtsp://192.168.1.100:554/stream • D:\videos\border.mp4 • 0 (webcam)</p>
+          <label for="cam-source">Video / Stream Source</label>
+          <input type="text" id="cam-source" placeholder="YouTube URL, RTSP link, HLS .m3u8, local file path, or 0">
+          <p class="form-hint">Examples: https://www.youtube.com/watch?v=sKcmQQqzQcM • rtsp://192.168.1.100:554/live • D:\videos\border.mp4 • 0 (webcam)</p>
         </div>
         <div class="form-group">
           <label for="cam-location">Location (Optional)</label>

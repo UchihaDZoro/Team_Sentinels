@@ -16,6 +16,7 @@ from services.detector import ObjectDetector
 from services.virtual_fence import VirtualFence
 from services.alert_engine import AlertEngine
 from services.night_enhance import NightEnhancer
+from services.stream_resolver import resolve_stream_source, is_network_stream, is_youtube_url
 
 
 class CameraStream:
@@ -24,6 +25,10 @@ class CameraStream:
     def __init__(self, camera_id: str, source: str):
         self.camera_id = camera_id
         self.source = source
+        self.resolved_source = source
+        self.is_stream = False
+        self.is_live = False
+        self.stream_title = ""
         self.cap: Optional[cv2.VideoCapture] = None
         self.thread: Optional[threading.Thread] = None
         self.running = False
@@ -101,15 +106,23 @@ class StreamManager:
         except Exception:
             pass
 
+        # Resolve online stream (YouTube, HLS m3u8, RTSP, etc.)
+        resolved_source, meta = resolve_stream_source(source)
+        cam.resolved_source = resolved_source
+        cam.is_stream = meta.get("type") in ("youtube", "web_stream", "network_direct")
+        cam.is_live = meta.get("is_live", False)
+        cam.stream_title = meta.get("title", "")
+
         # Try parsing as integer (webcam index)
         try:
-            source_val = int(source)
+            source_val = int(resolved_source)
         except ValueError:
-            source_val = source
+            source_val = resolved_source
 
+        print(f"[IBVAP] Opening video capture for '{camera_id}' ({meta.get('type')}) -> {str(source_val)[:80]}...")
         cap = cv2.VideoCapture(source_val)
         if not cap.isOpened():
-            print(f"[IBVAP] ✗ Cannot open source: {source}")
+            print(f"[IBVAP] ✗ Cannot open source: {source} (resolved: {str(source_val)[:80]})")
             return False
 
         cam.cap = cap
@@ -131,7 +144,7 @@ class StreamManager:
         )
         cam.thread.start()
         self.db.update_camera_status(camera_id, "active")
-        print(f"[IBVAP] ✓ Camera '{camera_id}' started — source: {source}")
+        print(f"[IBVAP] ✓ Camera '{camera_id}' started — source: {source} (live={cam.is_live})")
         return True
 
     def stop_camera(self, camera_id: str):
@@ -204,15 +217,43 @@ class StreamManager:
     def _process_loop(self, camera_id: str):
         cam = self.cameras[camera_id]
         frame_interval = 1.0 / TARGET_FPS
+        consecutive_read_fails = 0
 
         while cam.running:
             loop_start = time.time()
 
-            ret, raw_frame = cam.cap.read()
-            if not ret:
-                # Loop video files
-                cam.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            if cam.cap is None or not cam.cap.isOpened():
+                time.sleep(0.5)
                 continue
+
+            ret, raw_frame = cam.cap.read()
+            if not ret or raw_frame is None:
+                consecutive_read_fails += 1
+                if cam.is_stream:
+                    # Brief pause for network stream jitter
+                    time.sleep(0.1)
+                    if consecutive_read_fails > 25:  # ~2.5s of failed reads
+                        print(f"[IBVAP] Stream read stalled for '{camera_id}', attempting reconnect...")
+                        try:
+                            new_url, _ = resolve_stream_source(cam.source)
+                            cam.resolved_source = new_url
+                            if cam.cap:
+                                cam.cap.release()
+                            cam.cap = cv2.VideoCapture(new_url)
+                            consecutive_read_fails = 0
+                            print(f"[IBVAP] Stream '{camera_id}' reconnected successfully.")
+                        except Exception as e:
+                            print(f"[IBVAP] Reconnect failed for '{camera_id}': {e}")
+                            time.sleep(1.0)
+                    continue
+                else:
+                    # Loop video files
+                    cam.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    consecutive_read_fails = 0
+                    time.sleep(0.01)
+                    continue
+
+            consecutive_read_fails = 0
 
             # Resize for consistent processing
             frame = cv2.resize(raw_frame, (FRAME_WIDTH, FRAME_HEIGHT))

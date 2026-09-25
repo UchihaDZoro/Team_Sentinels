@@ -185,17 +185,33 @@ async def websocket_endpoint(websocket: WebSocket):
 # ═══════════════════════════════════════════════════════════════
 @app.post("/api/cameras")
 async def add_camera(req: AddCameraRequest):
-    cam_name = req.name.strip() if req.name and req.name.strip() else Path(req.source).stem.replace("_", " ").title() or "Surveillance Feed"
+    source_clean = req.source.strip()
+    if req.name and req.name.strip():
+        cam_name = req.name.strip()
+    elif "youtube.com" in source_clean or "youtu.be" in source_clean:
+        cam_name = "YouTube Live CCTV"
+    elif source_clean.startswith("rtsp://"):
+        cam_name = "RTSP Camera Feed"
+    elif source_clean.startswith("http://") or source_clean.startswith("https://"):
+        cam_name = "Online Stream Feed"
+    else:
+        cam_name = Path(source_clean).stem.replace("_", " ").title() or "Surveillance Feed"
+
     cam_id = f"cam_{uuid.uuid4().hex[:8]}"
-    cam = db.add_camera(cam_id, cam_name, req.source, req.location or "Border Checkpost")
-    stream_manager.add_camera(cam_id, req.source)
+    cam = db.add_camera(cam_id, cam_name, source_clean, req.location or "Border Checkpost")
+    stream_manager.add_camera(cam_id, source_clean)
     if req.auto_start:
         ok = stream_manager.start_camera(cam_id)
         if not ok:
             return JSONResponse(
-                {"error": f"Cannot open video source: {req.source}", "camera": cam},
+                {"error": f"Cannot open video source: {source_clean}", "camera": cam},
                 status_code=400,
             )
+        # Update camera name if YouTube title was discovered
+        cs = stream_manager.cameras.get(cam_id)
+        if cs and cs.stream_title and (not req.name or not req.name.strip()):
+            db.update_camera_name(cam_id, cs.stream_title)
+
     return {"camera": db.get_camera(cam_id)}
 
 

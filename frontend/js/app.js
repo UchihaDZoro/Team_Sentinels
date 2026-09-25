@@ -249,7 +249,7 @@ async function playDirectFilepath() {
   const input = document.getElementById('quick-filepath-input');
   const source = input ? input.value.trim() : '';
   if (!source) {
-    alert('Please enter or paste a valid video filepath (e.g. D:\\CCTron\\backend\\demo_videos\\surveillance_humans_and_cars.mp4)');
+    alert('Please enter or paste a valid YouTube link, live stream URL, or video filepath (e.g. https://www.youtube.com/watch?v=sKcmQQqzQcM)');
     return;
   }
 
@@ -261,13 +261,26 @@ async function playDirectFilepath() {
   }
 
   try {
-    const filename = source.split(/[\\/]/).pop() || 'Video Feed';
-    const name = filename.replace(/\.[^/.]+$/, '').replace(/_/g, ' ').toUpperCase();
+    let name = '';
+    let location = 'Local Feed';
+    if (source.includes('youtube.com') || source.includes('youtu.be')) {
+      name = 'YouTube Live CCTV';
+      location = 'YouTube Live Stream';
+    } else if (source.startsWith('rtsp://')) {
+      name = 'RTSP Camera';
+      location = 'Network RTSP';
+    } else if (source.startsWith('http://') || source.startsWith('https://')) {
+      name = 'Online Stream';
+      location = 'Online Stream';
+    } else {
+      const filename = source.split(/[\\/]/).pop() || 'Video Feed';
+      name = filename.replace(/\.[^/.]+$/, '').replace(/_/g, ' ').toUpperCase();
+    }
 
     const res = await fetch(`${API_BASE}/api/cameras`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, source, location: 'Local Feed', auto_start: true }),
+      body: JSON.stringify({ name, source, location, auto_start: true }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -285,6 +298,53 @@ async function playDirectFilepath() {
   } finally {
     if (btn) {
       btn.textContent = origText;
+      btn.disabled = false;
+    }
+  }
+}
+
+async function playYouTubePreset(url, label) {
+  document.querySelectorAll('.chip-btn').forEach(btn => btn.classList.remove('active'));
+  if (window.event && window.event.target) {
+    window.event.target.classList.add('active');
+  }
+
+  const input = document.getElementById('quick-filepath-input');
+  if (input) input.value = url;
+
+  const btn = document.getElementById('play-filepath-btn');
+  if (btn) {
+    btn.textContent = 'RESOLVING STREAM...';
+    btn.disabled = true;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/cameras`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: label,
+        source: url,
+        location: 'YouTube 24/7 Live Cam',
+        auto_start: true,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || 'Failed to start YouTube live stream');
+      return;
+    }
+
+    showToast({
+      severity: 'low',
+      message: `Live YouTube Feed Active: ${label} [Green: Humans | Yellow: Vehicles]`
+    });
+    await loadCameras();
+  } catch (e) {
+    alert('Error connecting live stream: ' + e.message);
+  } finally {
+    if (btn) {
+      btn.textContent = '▶ PLAY & ANALYZE';
       btn.disabled = false;
     }
   }

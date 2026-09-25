@@ -16,6 +16,7 @@ backend/data/*.db-shm
 backend/data/*.db-wal
 backend/data/snapshots/*
 !backend/data/snapshots/.gitkeep
+backend/demo_videos/upload_*
 
 # Model weights (auto-downloaded by Ultralytics on first run)
 *.pt
