@@ -8,6 +8,7 @@ import json
 import time
 import threading
 import numpy as np
+from pathlib import Path
 from typing import Optional
 
 from config import FRAME_WIDTH, FRAME_HEIGHT, TARGET_FPS
@@ -83,6 +84,23 @@ class StreamManager:
 
         # Try to open source
         source = cam.source
+
+        # If source is a directory or path without file, auto-resolve to first video inside
+        try:
+            p = Path(source)
+            if p.exists() and p.is_dir():
+                vids = []
+                for ext in ("*.mp4", "*.avi", "*.mkv", "*.mov"):
+                    vids.extend(p.glob(ext))
+                if vids:
+                    source = str(vids[0])
+                    cam.source = source
+                    if hasattr(self.db, "update_camera_source"):
+                        self.db.update_camera_source(camera_id, source)
+                    print(f"[IBVAP] Auto-resolved folder to video file: {source}")
+        except Exception:
+            pass
+
         # Try parsing as integer (webcam index)
         try:
             source_val = int(source)
@@ -168,15 +186,18 @@ class StreamManager:
             with cam.frame_lock:
                 frame = cam.latest_frame
             if frame is not None:
-                _, buffer = cv2.imencode(
-                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70]
+                ok, buffer = cv2.imencode(
+                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75]
                 )
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n"
-                    + buffer.tobytes()
-                    + b"\r\n"
-                )
+                if ok:
+                    data = buffer.tobytes()
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Content-Length: " + str(len(data)).encode() + b"\r\n\r\n"
+                        + data
+                        + b"\r\n"
+                    )
             time.sleep(1 / TARGET_FPS)
 
     # ── Main processing loop (runs in a thread per camera) ──────

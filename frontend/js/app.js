@@ -433,12 +433,24 @@ async function addCamera() {
 // API — Camera actions
 // ═══════════════════════════════════════════════════════════════
 async function startCamera(camId) {
-  await fetch(`${API_BASE}/api/cameras/${camId}/start`, { method: 'POST' });
+  try {
+    const res = await fetch(`${API_BASE}/api/cameras/${camId}/start`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.detail || data.error || 'Failed to start video source. Please check that the file path is a valid video file.');
+    }
+  } catch (e) {
+    alert('Connection error: ' + e.message);
+  }
   await loadCameras();
 }
 
 async function stopCamera(camId) {
-  await fetch(`${API_BASE}/api/cameras/${camId}/stop`, { method: 'POST' });
+  try {
+    await fetch(`${API_BASE}/api/cameras/${camId}/stop`, { method: 'POST' });
+  } catch (e) {
+    console.error('Stop error:', e);
+  }
   await loadCameras();
 }
 
@@ -521,7 +533,7 @@ function createCameraCard(cam) {
     </div>
     <div class="camera-feed">
       ${cam.status === 'active'
-        ? `<img src="${API_BASE}/api/cameras/${cam.id}/stream" alt="${cam.name}" loading="lazy">`
+        ? `<img src="${API_BASE}/api/cameras/${cam.id}/stream" alt="${escapeHtml(cam.name)}" onerror="handleStreamError(this, '${cam.id}')">`
         : `<div class="placeholder"><span class="icon">📹</span>Camera offline</div>`
       }
     </div>
@@ -539,14 +551,23 @@ function createCameraCard(cam) {
       <button class="cam-btn" onclick="openFenceEditor('${cam.id}')" title="Virtual Fence">🔲</button>
       <button class="cam-btn" onclick="toggleNightMode('${cam.id}', true)" title="Night Mode">🌙</button>
       ${cam.status === 'active'
-        ? `<button class="cam-btn" onclick="stopCamera('${cam.id}')" title="Stop">⏹</button>`
-        : `<button class="cam-btn" onclick="startCamera('${cam.id}')" title="Start">▶</button>`
+        ? `<button class="cam-btn btn-start-stop" onclick="stopCamera('${cam.id}')" title="Stop">⏹</button>`
+        : `<button class="cam-btn btn-start-stop" onclick="startCamera('${cam.id}')" title="Start">▶</button>`
       }
       <button class="cam-btn danger" onclick="deleteCamera('${cam.id}')" title="Delete">✕</button>
     </div>
   `;
 
   return card;
+}
+
+function handleStreamError(img, camId) {
+  console.warn(`[Stream] Stream reconnecting for ${camId}...`);
+  setTimeout(() => {
+    if (img && img.parentElement) {
+      img.src = `${API_BASE}/api/cameras/${camId}/stream?t=${Date.now()}`;
+    }
+  }, 1500);
 }
 
 function updateCameraCard(card, cam) {
@@ -561,12 +582,23 @@ function updateCameraCard(card, cam) {
     if (cam.status === 'active') {
       const existingImg = feed.querySelector('img');
       if (!existingImg) {
-        feed.innerHTML = `<img src="${API_BASE}/api/cameras/${cam.id}/stream" alt="${cam.name}">`;
+        feed.innerHTML = `<img src="${API_BASE}/api/cameras/${cam.id}/stream" alt="${escapeHtml(cam.name)}" onerror="handleStreamError(this, '${cam.id}')">`;
       }
     } else {
-      if (!feed.querySelector('.placeholder')) {
-        feed.innerHTML = `<div class="placeholder"><span class="icon">📹</span>Camera offline</div>`;
-      }
+      feed.innerHTML = `<div class="placeholder"><span class="icon">📹</span>Camera offline</div>`;
+    }
+  }
+
+  const startStopBtn = card.querySelector('.btn-start-stop');
+  if (startStopBtn) {
+    if (cam.status === 'active') {
+      startStopBtn.title = 'Stop';
+      startStopBtn.textContent = '⏹';
+      startStopBtn.setAttribute('onclick', `stopCamera('${cam.id}')`);
+    } else {
+      startStopBtn.title = 'Start';
+      startStopBtn.textContent = '▶';
+      startStopBtn.setAttribute('onclick', `startCamera('${cam.id}')`);
     }
   }
 }

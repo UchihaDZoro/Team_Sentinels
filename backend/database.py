@@ -81,6 +81,10 @@ class Database:
         self._conn().execute("UPDATE cameras SET status=? WHERE id=?", (status, cam_id))
         self._conn().commit()
 
+    def update_camera_source(self, cam_id: str, source: str):
+        self._conn().execute("UPDATE cameras SET source=? WHERE id=?", (source, cam_id))
+        self._conn().commit()
+
     def update_fence_zones(self, cam_id: str, zones: list):
         self._conn().execute(
             "UPDATE cameras SET fence_zones=? WHERE id=?",

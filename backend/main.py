@@ -297,6 +297,12 @@ async def camera_stream(camera_id: str):
     return StreamingResponse(
         stream_manager.generate_mjpeg(camera_id),
         media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Access-Control-Allow-Origin": "*",
+        },
     )
 
 
