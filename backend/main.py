@@ -9,6 +9,7 @@ import asyncio
 import json
 import uuid
 import os
+import base64
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -20,12 +21,15 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from config import DATABASE_PATH, FRONTEND_DIR, SNAPSHOTS_DIR, DEMO_VIDEOS_DIR
+from config import DATABASE_PATH, FRONTEND_DIR, SNAPSHOTS_DIR, DEMO_VIDEOS_DIR, DATA_DIR
 from database import Database
 from services.detector import ObjectDetector
 from services.virtual_fence import VirtualFence
 from services.alert_engine import AlertEngine
 from services.night_enhance import NightEnhancer
+from services.behavior_engine import BehaviorEngine
+from services.frs_engine import FRSEngine
+from services.anpr_engine import ANPREngine
 from services.stream_manager import StreamManager
 
 
@@ -37,6 +41,9 @@ detector: ObjectDetector = None
 fence: VirtualFence = None
 alert_engine: AlertEngine = None
 night_enhancer: NightEnhancer = None
+behavior_engine: BehaviorEngine = None
+frs_engine: FRSEngine = None
+anpr_engine: ANPREngine = None
 stream_manager: StreamManager = None
 
 # WebSocket connections for real-time alerts
@@ -48,7 +55,7 @@ ws_clients: set[WebSocket] = set()
 # ═══════════════════════════════════════════════════════════════
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db, detector, fence, alert_engine, night_enhancer, stream_manager
+    global db, detector, fence, alert_engine, night_enhancer, behavior_engine, frs_engine, anpr_engine, stream_manager
 
     print("=" * 60)
     print("  IBVAP — Intelligent Border Video Analytics Platform")
@@ -60,8 +67,13 @@ async def lifespan(app: FastAPI):
     fence = VirtualFence()
     night_enhancer = NightEnhancer()
     alert_engine = AlertEngine(db)
+    behavior_engine = BehaviorEngine()
+    frs_engine = FRSEngine(db)
+    anpr_engine = ANPREngine(db)
 
-    stream_manager = StreamManager(detector, fence, alert_engine, night_enhancer, db)
+    stream_manager = StreamManager(
+        detector, fence, alert_engine, night_enhancer, db, behavior_engine, frs_engine, anpr_engine
+    )
 
     # Get the running event loop and wire alert push
     running_loop = asyncio.get_running_loop()
@@ -106,8 +118,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve snapshots
+# Serve snapshots & data
 app.mount("/snapshots", StaticFiles(directory=str(SNAPSHOTS_DIR)), name="snapshots")
+if DATA_DIR.exists():
+    app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
 
 
 
@@ -126,7 +140,44 @@ class SetFenceRequest(BaseModel):
 
 
 class NightModeRequest(BaseModel):
-    enabled: bool
+    mode: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+
+class VisionModeRequest(BaseModel):
+    mode: str  # "normal", "clahe", "flir", "nvg"
+
+
+class WatchlistTargetRequest(BaseModel):
+    name: str
+    category: str
+    danger_level: Optional[str] = "HIGH"
+    threat_level: Optional[str] = None
+    notes: Optional[str] = ""
+    photo_url: Optional[str] = ""
+    image_base64: Optional[str] = ""
+
+
+class HotlistVehicleRequest(BaseModel):
+    plate_number: str
+    vehicle_model: Optional[str] = "Vehicle"
+    reason: str
+    danger_level: Optional[str] = "HIGH"
+    threat_level: Optional[str] = None
+    status: Optional[str] = "ACTIVE"
+
+
+class ScanVehicleRequest(BaseModel):
+    camera_id: str
+    plate_number: str
+    vehicle_type: str
+    confidence: Optional[float] = 0.95
+    is_hotlist: Optional[int] = 0
+
+
+class ThreatLevelRequest(BaseModel):
+    level: int  # 1, 3, 5
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -134,9 +185,10 @@ class NightModeRequest(BaseModel):
 # ═══════════════════════════════════════════════════════════════
 async def broadcast_alert(alert: dict):
     """Push a new alert to all connected WebSocket clients."""
+    global ws_clients
     message = json.dumps({"type": "alert", "data": alert})
     dead = set()
-    for ws in ws_clients:
+    for ws in list(ws_clients):
         try:
             await ws.send_text(message)
         except Exception:
@@ -146,12 +198,13 @@ async def broadcast_alert(alert: dict):
 
 async def broadcast_stats():
     """Periodically push stats to all WebSocket clients."""
+    global ws_clients
     while True:
         if ws_clients and stream_manager:
             stats = stream_manager.get_stats()
             message = json.dumps({"type": "stats", "data": stats})
             dead = set()
-            for ws in ws_clients:
+            for ws in list(ws_clients):
                 try:
                     await ws.send_text(message)
                 except Exception:
@@ -241,14 +294,17 @@ async def list_cameras():
     for cam in cameras:
         cs = stream_manager.cameras.get(cam["id"])
         if cs:
+            cam["night_mode"] = cs.night_mode
             cam["live"] = {
                 "fps": round(cs.fps, 1),
                 "persons": cs.person_count,
                 "vehicles": cs.vehicle_count,
                 "intrusions": cs.intrusion_count,
                 "running": cs.running,
+                "night_mode": cs.night_mode,
             }
     return {"cameras": cameras}
+
 
 
 @app.post("/api/cameras/{camera_id}/start")
@@ -285,14 +341,64 @@ async def delete_camera(camera_id: str):
     return {"status": "deleted"}
 
 
-# ── Night mode ──────────────────────────────────────────────────
+# ── Night mode & Vision mode ────────────────────────────────────
 @app.post("/api/cameras/{camera_id}/night-mode")
 async def set_night_mode(camera_id: str, req: NightModeRequest):
-    db.update_night_mode(camera_id, req.enabled)
-    cam = stream_manager.cameras.get(camera_id)
-    if cam:
-        cam.night_mode = req.enabled
-    return {"night_mode": req.enabled}
+    """
+    Set camera tactical night vision mode.
+    Supported modes: 'clahe' (Tactical CLAHE + Adaptive Gamma),
+                     'thermal' (FLIR Ironbow False-Color),
+                     'nvg' (Gen 3+ Green Phosphor NVG),
+                     'off' (Raw Camera Feed).
+    """
+    cam_info = db.get_camera(camera_id)
+    if not cam_info and camera_id not in stream_manager.cameras:
+        raise HTTPException(404, f"Camera '{camera_id}' not found")
+
+    if req.mode is not None:
+        mode = req.mode.lower().strip()
+    elif req.enabled is not None:
+        mode = "clahe" if req.enabled else "off"
+    else:
+        mode = "off"
+
+    # Alias flir -> thermal
+    if mode == "flir":
+        mode = "thermal"
+
+    valid_modes = {"off", "clahe", "thermal", "nvg"}
+    if mode not in valid_modes:
+        raise HTTPException(
+            400,
+            f"Invalid night vision mode '{mode}'. Allowed modes: {sorted(list(valid_modes))}",
+        )
+
+    db.update_night_mode(camera_id, mode)
+    stream_manager.set_night_mode(camera_id, mode)
+
+    return {
+        "camera_id": camera_id,
+        "night_mode": mode,
+        "status": "active" if mode != "off" else "off",
+    }
+
+
+@app.post("/api/cameras/{camera_id}/vision-mode")
+async def set_vision_mode(camera_id: str, req: VisionModeRequest):
+    mode = req.mode.lower().strip()
+    if mode == "flir":
+        mode = "thermal"
+    elif mode == "normal":
+        mode = "off"
+
+    valid_modes = {"off", "clahe", "thermal", "nvg"}
+    if mode not in valid_modes:
+        raise HTTPException(400, f"Invalid vision mode '{mode}'. Allowed modes: {sorted(list(valid_modes))}")
+
+    db.update_night_mode(camera_id, mode)
+    stream_manager.set_night_mode(camera_id, mode)
+    return {"status": "ok", "vision_mode": mode}
+
 
 
 # ── Virtual fence ───────────────────────────────────────────────
@@ -337,8 +443,17 @@ async def camera_stream(camera_id: str):
 async def list_alerts(
     limit: int = Query(50, ge=1, le=500),
     camera_id: Optional[str] = None,
+    alert_type: Optional[str] = None,
+    severity: Optional[str] = None,
 ):
-    return {"alerts": db.list_alerts(limit=limit, camera_id=camera_id)}
+    return {
+        "alerts": db.list_alerts(
+            limit=limit,
+            camera_id=camera_id,
+            alert_type=alert_type,
+            severity=severity,
+        )
+    }
 
 
 @app.post("/api/alerts/{alert_id}/acknowledge")
@@ -360,6 +475,7 @@ async def clear_alerts(camera_id: Optional[str] = None):
 async def get_analytics():
     return {
         "alert_counts": db.get_alert_counts(),
+        "behavioral_breakdown": db.get_behavioral_breakdown(),
         "hourly_alerts": db.get_hourly_alerts(24),
         "live_stats": stream_manager.get_stats() if stream_manager else {},
     }
@@ -376,6 +492,252 @@ async def list_demo_videos():
         for f in DEMO_VIDEOS_DIR.glob(ext):
             videos.append({"name": f.stem, "path": str(f), "size_mb": round(f.stat().st_size / 1e6, 1)})
     return {"videos": videos}
+
+
+# ═══════════════════════════════════════════════════════════════
+# REST API — Tactical Status & Defense Threat Level
+# ═══════════════════════════════════════════════════════════════
+tactical_state = {
+    "threat_level": 5,  # 5: LOW, 3: ELEVATED, 1: CRITICAL
+    "operator_name": "INSP. V. SHARMA [SSB 42nd BN]",
+    "operator_callsign": "SENTRY-ALPHA-1",
+    "station_id": "C2 TACTICAL CONSOLE 01",
+    "sector_name": "SECTOR-IV (INDO-NEPAL FRONTIER - BIRGUNJ AXIS)",
+    "active_bops": 7,
+    "total_bops": 7,
+}
+
+@app.get("/api/tactical/status")
+async def get_tactical_status():
+    return tactical_state
+
+@app.post("/api/tactical/threat-level")
+async def set_threat_level(req: ThreatLevelRequest):
+    tactical_state["threat_level"] = req.level
+    # Broadcast to all WS clients
+    for ws in list(ws_clients):
+        try:
+            await ws.send_text(json.dumps({"type": "threat_level", "data": {"level": req.level}}))
+        except Exception:
+            pass
+    return {"status": "ok", "threat_level": req.level}
+
+
+# ═══════════════════════════════════════════════════════════════
+# REST API — FRS Watchlist
+# ═══════════════════════════════════════════════════════════════
+@app.get("/api/frs/watchlist")
+async def get_frs_watchlist():
+    if frs_engine:
+        frs_engine.reload_watchlist()
+    return {"watchlist": db.list_watchlist()}
+
+@app.post("/api/frs/watchlist")
+async def add_frs_target(req: WatchlistTargetRequest):
+    threat = req.threat_level or req.danger_level or "HIGH"
+    img_bytes = None
+    if req.image_base64:
+        try:
+            raw_b64 = req.image_base64.split(",")[-1]
+            img_bytes = base64.b64decode(raw_b64)
+        except Exception:
+            pass
+
+    if frs_engine:
+        target = frs_engine.add_person(
+            name=req.name.strip(),
+            category=req.category.strip(),
+            threat_level=threat,
+            notes=req.notes or "",
+            image_bytes=img_bytes,
+            photo_url=req.photo_url or "",
+        )
+    else:
+        target_id = f"TGT-{uuid.uuid4().hex[:4].upper()}"
+        photo = req.photo_url or f"https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
+        target = db.add_watchlist_target(
+            target_id=target_id,
+            name=req.name.strip(),
+            category=req.category,
+            danger_level=threat,
+            notes=req.notes or "",
+            photo_url=photo,
+        )
+    return {"target": target}
+
+@app.post("/api/frs/watchlist/upload")
+async def upload_frs_target(
+    name: str = Query(...),
+    category: str = Query(...),
+    threat_level: str = Query("HIGH"),
+    notes: str = Query(""),
+    file: UploadFile = File(...),
+):
+    content = await file.read()
+    if frs_engine:
+        target = frs_engine.add_person(
+            name=name.strip(),
+            category=category.strip(),
+            threat_level=threat_level,
+            notes=notes,
+            image_bytes=content,
+        )
+    else:
+        target_id = f"TGT-{uuid.uuid4().hex[:4].upper()}"
+        target = db.add_watchlist_target(
+            target_id=target_id,
+            name=name.strip(),
+            category=category.strip(),
+            danger_level=threat_level,
+            notes=notes,
+        )
+    return {"target": target}
+
+@app.delete("/api/frs/watchlist/{target_id}")
+async def delete_frs_target(target_id: str):
+    if frs_engine:
+        frs_engine.delete_person(target_id)
+    else:
+        db.delete_watchlist_target(target_id)
+    return {"status": "deleted"}
+
+@app.post("/api/frs/simulate-match")
+async def simulate_frs_match(target_id: Optional[str] = Query(None)):
+    watchlist = db.list_watchlist()
+    if not watchlist:
+        raise HTTPException(404, "No targets in watchlist")
+    
+    target = None
+    if target_id:
+        target = db.get_watchlist_target(target_id)
+    if not target:
+        target = watchlist[0]
+
+    location = "BOP-17 Sector IV Perimeter"
+    db.record_frs_match(target["id"], location)
+
+    alert_type = "WATCHLIST_SUSPECT_DETECTED"
+    severity = "critical" if target.get("danger_level") in ("CRITICAL", "HIGH") or target.get("threat_level") in ("CRITICAL", "HIGH") else "medium"
+    msg = f"WATCHLIST SUSPECT DETECTED: {target['name']} ({target['category'].upper()}, 98% biometric match, Target ID: {target['id']})"
+    
+    alert = db.add_alert(
+        camera_id="cam_bop17",
+        alert_type=alert_type,
+        message=msg,
+        severity=severity,
+        details={
+            "target_id": target["id"],
+            "name": target["name"],
+            "category": target["category"],
+            "threat_level": target.get("threat_level", "CRITICAL"),
+            "confidence": 98.4,
+            "photo_url": target.get("photo_url", ""),
+            "location": location,
+        },
+    )
+    await broadcast_alert(alert)
+    return {"status": "matched", "target": target, "alert": alert}
+
+
+# ═══════════════════════════════════════════════════════════════
+# REST API — ANPR Vehicle Scanner & Hotlist
+# ═══════════════════════════════════════════════════════════════
+@app.get("/api/anpr/hotlist")
+async def get_anpr_hotlist():
+    if anpr_engine:
+        anpr_engine.reload_hotlist()
+    return {"hotlist": db.list_hotlist()}
+
+@app.post("/api/anpr/hotlist")
+async def add_anpr_hotlist(req: HotlistVehicleRequest):
+    threat = req.threat_level or req.danger_level or "HIGH"
+    model = req.vehicle_model or "Vehicle"
+    if anpr_engine:
+        vehicle = anpr_engine.add_hotlist_plate(
+            plate_number=req.plate_number,
+            vehicle_model=model,
+            reason=req.reason,
+            threat_level=threat,
+            status=req.status or "ACTIVE",
+        )
+    else:
+        vehicle = db.add_hotlist_vehicle(
+            plate_number=req.plate_number,
+            vehicle_model=model,
+            reason=req.reason,
+            danger_level=threat,
+            status=req.status or "ACTIVE",
+        )
+    return {"vehicle": vehicle}
+
+@app.delete("/api/anpr/hotlist/{plate}")
+async def delete_anpr_hotlist(plate: str):
+    if anpr_engine:
+        anpr_engine.delete_hotlist_plate(plate)
+    else:
+        db.delete_hotlist_vehicle(plate)
+    return {"status": "deleted"}
+
+@app.get("/api/anpr/scans")
+async def get_anpr_scans(limit: int = Query(50, ge=1, le=200)):
+    if anpr_engine:
+        scans = anpr_engine.list_scans(limit)
+        if scans:
+            return {"scans": scans}
+    return {"scans": db.list_scans(limit)}
+
+@app.post("/api/anpr/scans")
+async def record_anpr_scan(req: ScanVehicleRequest):
+    scan = db.record_scan(
+        camera_id=req.camera_id,
+        plate_number=req.plate_number,
+        vehicle_type=req.vehicle_type,
+        confidence=req.confidence or 0.95,
+        is_hotlist=req.is_hotlist or 0,
+    )
+    return {"scan": scan}
+
+@app.post("/api/anpr/simulate-scan")
+async def simulate_anpr_scan(plate: Optional[str] = Query(None)):
+    hotlist = db.list_hotlist()
+    target_veh = None
+    if plate:
+        for v in hotlist:
+            if v["plate_number"].upper() == plate.upper():
+                target_veh = v
+                break
+    if not target_veh and hotlist:
+        target_veh = hotlist[0]
+    
+    plate_no = target_veh["plate_number"] if target_veh else "UP 53 AZ 4421"
+    model = target_veh["vehicle_model"] if target_veh else "White Mahindra Bolero"
+    reason = target_veh["reason"] if target_veh else "Suspected Contraband Carrier"
+
+    scan = db.record_scan(
+        camera_id="cam_bop14",
+        plate_number=plate_no,
+        vehicle_type=model,
+        confidence=0.97,
+        is_hotlist=1,
+    )
+
+    alert_type = "BLACKLIST_VEHICLE_DETECTED"
+    msg = f"BLACKLIST VEHICLE DETECTED: [{plate_no}] ({model}) Reason: {reason}"
+    alert = db.add_alert(
+        camera_id="cam_bop14",
+        alert_type=alert_type,
+        message=msg,
+        severity="critical",
+        details={
+            "plate_number": plate_no,
+            "vehicle_model": model,
+            "reason": reason,
+            "confidence": 97.0,
+            "location": "BOP-14 Vehicle Checkpost",
+        },
+    )
+    await broadcast_alert(alert)
+    return {"status": "scanned", "scan": scan, "alert": alert}
 
 
 # ═══════════════════════════════════════════════════════════════

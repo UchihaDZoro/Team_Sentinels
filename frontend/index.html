@@ -3,165 +3,509 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>IBVAP — Intelligent Border Video Analytics Platform</title>
-  <meta name="description" content="AI-powered CCTV surveillance analytics platform for border security. Real-time human detection, vehicle tracking, ANPR, and intrusion detection.">
+  <title>IBVAP — Tactical C2 & Border Video Analytics [SSB / MHA]</title>
+  <meta name="description" content="Sashastra Seema Bal (SSB) Intelligent Border Video Analytics Platform — Military-grade Command & Control situational awareness dashboard.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  
+  <!-- Leaflet GIS Map CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  
   <link rel="stylesheet" href="css/styles.css">
 </head>
-<body>
+<body class="tactical-hud">
+  <!-- Scanline CRT Overlay -->
+  <div class="hud-scanlines-overlay" aria-hidden="true"></div>
+
   <!-- ════════════════════════════════════════════════════════
-       HEADER
+       MILITARY TACTICAL HEADER
        ════════════════════════════════════════════════════════ -->
-  <header id="main-header">
-    <div class="logo">
-      <span class="logo-icon">🛡️</span>
-      <span class="logo-text">IBVAP</span>
-      <span class="logo-subtitle">INTELLIGENT BORDER VIDEO ANALYTICS</span>
+  <header id="main-header" class="military-header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-emblem">🇮🇳</span>
+        <div class="logo-stack">
+          <div class="logo-title-row">
+            <span class="logo-text">IBVAP</span>
+            <span class="logo-badge-mil">SSB C2 HUD</span>
+          </div>
+          <span class="logo-subtitle">SASHASTRA SEEMA BAL • MINISTRY OF HOME AFFAIRS</span>
+        </div>
+      </div>
+
+      <div class="tactical-telemetry-cluster">
+        <div class="telemetry-badge" title="Tactical Border Sector">
+          <span class="badge-icon">📍</span>
+          <span class="badge-label">SECTOR:</span>
+          <span class="badge-val highlight" id="sector-display">SECTOR-IV (INDO-NEPAL)</span>
+        </div>
+        <div class="telemetry-badge" title="Border Outposts Status">
+          <span class="badge-icon">🛡️</span>
+          <span class="badge-label">BOPS:</span>
+          <span class="badge-val text-green" id="bop-display">7 / 7 ACTIVE</span>
+        </div>
+        <div class="telemetry-badge sentry-badge" title="Authorized Console Sentry">
+          <span class="badge-icon">🎖️</span>
+          <span class="badge-label">OPERATOR:</span>
+          <span class="badge-val text-cyan" id="operator-display">INSP. V. SHARMA [42nd BN]</span>
+        </div>
+      </div>
     </div>
-    <div class="header-stats">
-      <div class="stat-item">
-        <span class="stat-dot active" id="system-dot"></span>
-        <span id="system-status">ONLINE</span>
+
+    <!-- Threat Level / DEFCON Badge -->
+    <div class="header-center">
+      <div class="defcon-container" id="defcon-container" title="Click to change Threat Level">
+        <div class="defcon-strobe"></div>
+        <div class="defcon-badge level-5" id="defcon-badge">
+          <span class="defcon-tag">THREAT LEVEL</span>
+          <span class="defcon-status" id="defcon-text">LEVEL 5 • LOW</span>
+          <span class="defcon-sub" id="defcon-sub">PEACETIME SURVEILLANCE</span>
+        </div>
+        <div class="defcon-dropdown" id="defcon-dropdown">
+          <div class="defcon-opt level-5-opt" onclick="setThreatLevel(5)">
+            <span class="dot"></span>
+            <div><strong>LEVEL 5 (LOW)</strong><span>Normal peacetime vigilance</span></div>
+          </div>
+          <div class="defcon-opt level-3-opt" onclick="setThreatLevel(3)">
+            <span class="dot"></span>
+            <div><strong>LEVEL 3 (ELEVATED)</strong><span>Loitering / Crowd clusters detected</span></div>
+          </div>
+          <div class="defcon-opt level-1-opt" onclick="setThreatLevel(1)">
+            <span class="dot"></span>
+            <div><strong>LEVEL 1 (CRITICAL RED)</strong><span>Intrusion / FRS or ANPR intercept</span></div>
+          </div>
+        </div>
       </div>
-      <div class="stat-item">
-        <span class="stat-value" id="camera-count">0</span>
-        <span>CAMERAS</span>
+    </div>
+
+    <div class="header-right">
+      <!-- Dual Mission Clock -->
+      <div class="mission-clocks">
+        <div class="clock-box" title="Indian Standard Time">
+          <span class="clock-lbl">IST (LOCAL)</span>
+          <span class="clock-digits text-green" id="ist-clock">00:00:00 IST</span>
+        </div>
+        <div class="clock-divider">|</div>
+        <div class="clock-box" title="Zulu / UTC Military Time">
+          <span class="clock-lbl">ZULU / UTC</span>
+          <span class="clock-digits text-cyan" id="zulu-clock">00:00:00 Z</span>
+        </div>
       </div>
-      <div class="stat-item alert-stat">
-        <span class="stat-value" id="alert-count">0</span>
-        <span>ALERTS</span>
-      </div>
-      <div class="stat-item">
-        <span id="current-time">00:00:00</span>
+
+      <!-- Master Audio Siren Toggle -->
+      <button class="tactical-btn siren-btn armed" id="audio-siren-btn" onclick="toggleAudioMaster()" title="Toggle Tactical Audio Siren System">
+        <span class="siren-icon">🔊</span>
+        <span class="siren-text" id="siren-status-text">SIREN: ARMED</span>
+      </button>
+
+      <div class="header-stats-group">
+        <div class="stat-pill" title="Network Link Status">
+          <span class="stat-dot active" id="system-dot"></span>
+          <span id="system-status">ONLINE</span>
+        </div>
+        <div class="stat-pill" title="Registered Cameras">
+          <span class="stat-num text-cyan" id="camera-count">0</span>
+          <span class="stat-lbl">CAMS</span>
+        </div>
+        <div class="stat-pill alert-stat" title="Total Active Alerts">
+          <span class="stat-num text-red" id="alert-count">0</span>
+          <span class="stat-lbl">ALERTS</span>
+        </div>
       </div>
     </div>
   </header>
 
   <!-- ════════════════════════════════════════════════════════
-       MAIN CONTENT
+       FRS LIVE MATCH INTERCEPT BANNER (HUD ALERT POPUP)
        ════════════════════════════════════════════════════════ -->
-  <div id="app-container">
-    <!-- Camera Grid Section -->
-    <section id="camera-section">
-      <div class="camera-toolbar">
-        <h2>📡 SURVEILLANCE FEEDS</h2>
-        <div class="header-controls" style="display:flex; gap:8px;">
+  <div id="frs-intercept-banner" class="frs-banner-hidden">
+    <div class="frs-banner-inner">
+      <div class="frs-banner-radar">
+        <span class="radar-ping"></span>
+        <span class="frs-icon">⚠️</span>
+      </div>
+      <div class="frs-banner-target">
+        <div class="frs-photo-reticle">
+          <img id="frs-banner-photo" src="" alt="Target Photo">
+          <div class="reticle-box"></div>
+        </div>
+        <div class="frs-info-block">
+          <div class="frs-badge-row">
+            <span class="target-flag">🚨 FRS POSITIVE IDENTIFICATION MATCH</span>
+            <span class="target-danger" id="frs-banner-danger">CRITICAL</span>
+            <span class="target-conf" id="frs-banner-conf">98.4% CONFIDENCE</span>
+          </div>
+          <h3 id="frs-banner-name">Mohd. Tariq @ Tiger</h3>
+          <p class="frs-meta-line">
+            <span id="frs-banner-cat">Cross-Border Infiltrator</span> • 
+            <span id="frs-banner-loc">BOP-17 Sector IV Perimeter</span> • 
+            <span id="frs-banner-time">JUST NOW</span>
+          </p>
+        </div>
+      </div>
+      <div class="frs-banner-actions">
+        <button class="btn btn-danger btn-sm" onclick="dispatchQRT()">⚡ DISPATCH QRT SQUAD</button>
+        <button class="btn btn-secondary btn-sm" onclick="dismissFRSBanner()">ACKNOWLEDGE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       MAIN VIEW CONTAINER (C2 MULTI-VIEW)
+       ════════════════════════════════════════════════════════ -->
+  <div id="app-container" class="view-grid">
+    <!-- Camera Section & Tactical GIS Map Section (Swappable/Split) -->
+    <main id="primary-viewport">
+      <!-- C2 Operational Toolbar -->
+      <div class="c2-toolbar">
+        <div class="view-mode-selector">
+          <button class="view-tab active" id="tab-grid" onclick="setViewMode('grid')" title="Video Surveillance Grid">
+            📹 SURVEILLANCE FEEDS
+          </button>
+          <button class="view-tab" id="tab-map" onclick="setViewMode('map')" title="Interactive Border GIS Map">
+            🗺️ TACTICAL GIS MAP
+          </button>
+          <button class="view-tab" id="tab-split" onclick="setViewMode('split')" title="Dual Split Map & Feed HUD">
+            ⊞ SPLIT C2 VIEW
+          </button>
+        </div>
+
+        <div class="toolbar-tools">
+          <button class="btn btn-mil" id="open-frs-btn" onclick="openFRSModal()" title="Facial Recognition Suspect Watchlist">
+            👤 FRS WATCHLIST <span class="badge-count" id="frs-badge">5</span>
+          </button>
+          <button class="btn btn-mil" id="open-anpr-btn" onclick="openANPRModal()" title="Automated Number Plate Recognition Hotlist">
+            🚗 ANPR SCANNER <span class="badge-count" id="anpr-badge">4</span>
+          </button>
           <button class="btn btn-secondary btn-sm" id="clear-all-cameras-btn" onclick="clearAllCameras()" title="Clean all cameras from grid">
             🧹 CLEAR ALL
           </button>
-          <button class="btn btn-primary btn-sm" id="add-camera-btn" title="Add Camera">
+          <button class="btn btn-primary btn-sm" id="add-camera-btn" title="Add Camera Source">
             ＋ ADD CAMERA
           </button>
         </div>
       </div>
-      <!-- Direct Video Filepath & Quick Play Launcher -->
-      <div class="video-launcher-card" id="video-launcher">
-        <div class="launcher-header">
-          <div class="launcher-title">
-            <span class="pulse-icon">📡</span>
-            <span>LIVE STREAMS & VIDEO SURVEILLANCE FEED <span style="font-size: 10px; background: rgba(0,255,136,0.15); border: 1px solid var(--accent-green); padding: 2px 6px; border-radius: 4px; margin-left: 6px;">YOLO26 NMS-FREE</span></span>
+
+      <!-- CAMERA SECTION -->
+      <section id="camera-section">
+        <!-- Direct Video Filepath & Quick Play Launcher -->
+        <div class="video-launcher-card" id="video-launcher">
+          <div class="launcher-header">
+            <div class="launcher-title">
+              <span class="pulse-icon">📡</span>
+              <span>LIVE STREAMS & VIDEO SURVEILLANCE FEED <span class="yolo-chip">YOLO26 NMS-FREE</span></span>
+            </div>
+            <div class="legend-badges">
+              <span class="legend-badge legend-human">🟩 HUMANS (GREEN BOX)</span>
+              <span class="legend-badge legend-vehicle">🟨 VEHICLES (YELLOW BOX)</span>
+              <span class="legend-badge legend-intrusion">🟥 INTRUSIONS (RED BOX)</span>
+            </div>
           </div>
-          <div class="legend-badges">
-            <span class="legend-badge legend-human">🟩 HUMANS (GREEN BOX)</span>
-            <span class="legend-badge legend-vehicle">🟨 VEHICLES (YELLOW BOX)</span>
-            <span class="legend-badge legend-intrusion">🟥 INTRUSIONS (RED BOX)</span>
+
+          <div class="launcher-controls">
+            <div class="input-with-icon">
+              <span class="input-icon">🔗</span>
+              <input type="text" id="quick-filepath-input" 
+                placeholder="Paste YouTube link, live stream URL, or local file path (e.g. https://www.youtube.com/watch?v=sKcmQQqzQcM)" 
+                value="https://www.youtube.com/watch?v=sKcmQQqzQcM">
+            </div>
+            
+            <input type="file" id="video-file-input" accept="video/mp4,video/avi,video/mkv,video/mov" style="display:none;">
+            <button class="btn btn-secondary" id="browse-file-btn" type="button" title="Select video file from your computer">
+              📂 BROWSE FILE
+            </button>
+            
+            <button class="btn btn-success" id="play-filepath-btn" type="button">
+              ▶ PLAY & ANALYZE
+            </button>
+          </div>
+
+          <!-- Quick Preset Demo Video Chips -->
+          <div class="demo-chips-row">
+            <span class="chips-label">QUICK DEMO PRESETS:</span>
+            <button class="chip-btn active" type="button" onclick="playYouTubePreset('https://www.youtube.com/watch?v=sKcmQQqzQcM', 'Winter Garden Live Cam (YouTube)')">
+              🔴 YouTube Live Cam
+            </button>
+            <button class="chip-btn" type="button" onclick="playDemoPreset('surveillance_humans_and_cars.mp4', 'Surveillance (Humans & Cars)')">
+              👥+🚗 Humans & Cars
+            </button>
+            <button class="chip-btn" type="button" onclick="playDemoPreset('checkpost_vehicles.mp4', 'Checkpost Vehicles')">
+              🚗 Checkpost Vehicles
+            </button>
+            <button class="chip-btn" type="button" onclick="playDemoPreset('perimeter_pedestrians.mp4', 'Perimeter Pedestrians')">
+              👥 Perimeter Patrol
+            </button>
+            <button class="chip-btn" type="button" onclick="playDemoPreset('restricted_zone_humans.mp4', 'Restricted Zone Intrusion')">
+              🚨 Restricted Zone
+            </button>
+            <button class="chip-btn" type="button" onclick="playDemoPreset('checkpoint_single_person.mp4', 'Checkpoint Walkthrough')">
+              🚶 Checkpoint ID
+            </button>
           </div>
         </div>
 
-        <div class="launcher-controls">
-          <div class="input-with-icon">
-            <span class="input-icon">🔗</span>
-            <input type="text" id="quick-filepath-input" 
-              placeholder="Paste YouTube link, live stream URL, or local file path (e.g. https://www.youtube.com/watch?v=sKcmQQqzQcM)" 
-              value="https://www.youtube.com/watch?v=sKcmQQqzQcM">
-          </div>
+        <!-- Camera Grid -->
+        <div id="camera-grid" class="grid-4">
+          <!-- Camera cards injected dynamically by app.js -->
+        </div>
+      </section>
+
+      <!-- TACTICAL GIS MAP SECTION -->
+      <section id="gis-map-section" style="display: none;">
+        <div class="map-hud-container">
+          <div id="tactical-gis-map"></div>
           
-          <input type="file" id="video-file-input" accept="video/mp4,video/avi,video/mkv,video/mov" style="display:none;">
-          <button class="btn btn-secondary" id="browse-file-btn" type="button" title="Select video file from your computer">
-            📂 BROWSE FILE
-          </button>
-          
-          <button class="btn btn-success" id="play-filepath-btn" type="button">
-            ▶ PLAY & ANALYZE
-          </button>
+          <!-- Tactical Map Telemetry Overlay -->
+          <div class="map-overlay-panel" id="map-telemetry">
+            <div class="panel-header">
+              <span class="radar-blip"></span>
+              <h4>SECTOR-IV GIS SITREP</h4>
+              <span class="map-coord-readout" id="mouse-coords">27.0125° N, 84.8780° E</span>
+            </div>
+            <div class="bop-quick-list" id="bop-quick-list">
+              <div class="bop-tag" onclick="panToBOP('bop17')">BOP-17 (Highland)</div>
+              <div class="bop-tag" onclick="panToBOP('bop14')">BOP-14 (Checkpost)</div>
+              <div class="bop-tag" onclick="panToBOP('bop12')">BOP-12 (Riverine)</div>
+              <div class="bop-tag" onclick="panToBOP('alpha')">CP ALPHA (Transit)</div>
+              <div class="bop-tag" onclick="panToBOP('hq')">SSB SECTOR HQ</div>
+            </div>
+            <div class="map-legend-row">
+              <span><span class="dot-green"></span> ACTIVE CAMERA</span>
+              <span><span class="fov-cone-sample"></span> 60° FOV CONE</span>
+              <span><span class="dot-red-pulse"></span> ALERT RADAR RING</span>
+            </div>
+          </div>
         </div>
+      </section>
+    </main>
 
-        <!-- Quick Preset Demo Video Chips -->
-        <div class="demo-chips-row">
-          <span class="chips-label">QUICK DEMO PRESETS:</span>
-          <button class="chip-btn active" type="button" onclick="playYouTubePreset('https://www.youtube.com/watch?v=sKcmQQqzQcM', 'Winter Garden Live Cam (YouTube)')" style="background: rgba(255,51,75,0.15); border-color: #ff334b; color: #ff6b7d; font-weight: 700;">
-            🔴 YouTube Live Cam
-          </button>
-          <button class="chip-btn" type="button" onclick="playDemoPreset('surveillance_humans_and_cars.mp4', 'Surveillance (Humans & Cars)')">
-            👥+🚗 Humans & Cars
-          </button>
-          <button class="chip-btn" type="button" onclick="playDemoPreset('checkpost_vehicles.mp4', 'Checkpost Vehicles')">
-            🚗 Checkpost Vehicles
-          </button>
-          <button class="chip-btn" type="button" onclick="playDemoPreset('perimeter_pedestrians.mp4', 'Perimeter Pedestrians')">
-            👥 Perimeter Patrol
-          </button>
-          <button class="chip-btn" type="button" onclick="playDemoPreset('restricted_zone_humans.mp4', 'Restricted Zone Intrusion')">
-            🚨 Restricted Zone
-          </button>
-          <button class="chip-btn" type="button" onclick="playDemoPreset('checkpoint_single_person.mp4', 'Checkpoint Walkthrough')">
-            🚶 Checkpoint ID
-          </button>
-        </div>
-      </div>
-
-      <div id="camera-grid" class="grid-4">
-        <!-- Camera cards injected by JS -->
-      </div>
-    </section>
-
-    <!-- Alert Sidebar -->
+    <!-- ════════════════════════════════════════════════════════
+         ALERT SIDEBAR
+         ════════════════════════════════════════════════════════ -->
     <aside id="alert-sidebar">
       <div class="sidebar-header">
         <h2>🔔 LIVE ALERTS <span class="alert-counter" id="sidebar-alert-count">0</span></h2>
-        <button id="clear-alerts-btn">CLEAR</button>
+        <div style="display:flex; gap:6px;">
+          <button class="btn-icon" onclick="testAudioAlert('critical')" title="Test Tactical Warble Siren">🔊</button>
+          <button id="clear-alerts-btn">CLEAR</button>
+        </div>
       </div>
+      
+      <!-- Quick Alert Filter -->
+      <div class="alert-filter-bar">
+        <button class="filter-chip active" onclick="filterAlerts('all')">ALL</button>
+        <button class="filter-chip danger" onclick="filterAlerts('critical')">CRITICAL</button>
+        <button class="filter-chip warning" onclick="filterAlerts('high')">HIGH</button>
+        <button class="filter-chip info" onclick="filterAlerts('medium')">MED</button>
+      </div>
+
       <div id="alert-list">
         <div class="empty-state" id="alerts-empty">
           <span class="icon">📡</span>
-          <p>NO ALERTS</p>
-          <p>System monitoring active</p>
+          <p>NO ACTIVE ALERTS</p>
+          <p>SSB Perimeter AI Monitoring Active</p>
         </div>
       </div>
     </aside>
   </div>
 
   <!-- ════════════════════════════════════════════════════════
-       STATUS BAR
+       MILITARY STATUS FOOTER
        ════════════════════════════════════════════════════════ -->
   <footer id="status-bar">
-    <div class="status-item">
-      <span class="status-icon">👥</span>
-      <span class="status-val" id="total-persons">0</span>
-      <span>PERSONS</span>
+    <div class="status-left">
+      <div class="status-item">
+        <span class="status-icon">👥</span>
+        <span class="status-val" id="total-persons">0</span>
+        <span>PERSONS</span>
+      </div>
+      <div class="status-item">
+        <span class="status-icon">🚗</span>
+        <span class="status-val" id="total-vehicles">0</span>
+        <span>VEHICLES</span>
+      </div>
+      <div class="status-item danger">
+        <span class="status-icon">🚨</span>
+        <span class="status-val" id="total-intrusions">0</span>
+        <span>INTRUSIONS</span>
+      </div>
+      <div class="status-item">
+        <span class="status-icon">⚡</span>
+        <span class="status-val" id="avg-fps">0</span>
+        <span>FPS</span>
+      </div>
     </div>
-    <div class="status-item">
-      <span class="status-icon">🚗</span>
-      <span class="status-val" id="total-vehicles">0</span>
-      <span>VEHICLES</span>
-    </div>
-    <div class="status-item danger">
-      <span class="status-icon">🚨</span>
-      <span class="status-val" id="total-intrusions">0</span>
-      <span>INTRUSIONS</span>
-    </div>
-    <div class="status-item">
-      <span class="status-icon">⚡</span>
-      <span class="status-val" id="avg-fps">0</span>
-      <span>FPS</span>
-    </div>
-    <div class="status-item">
-      <span class="status-icon">🟢</span>
-      <span>IBVAP v1.0 — SSB SURVEILLANCE [YOLO26 AI]</span>
+    
+    <div class="status-right">
+      <div class="status-item">
+        <span class="status-icon text-cyan">🛰️</span>
+        <span id="ai-engine-status">YOLO26-NMS FREE ENGINE • BYTETRACK AI</span>
+      </div>
+      <div class="status-item">
+        <span class="status-icon text-green">🟢</span>
+        <span>IBVAP v2.0 MIL-C2 • SSB 42nd BATTALION</span>
+      </div>
     </div>
   </footer>
+
+  <!-- ════════════════════════════════════════════════════════
+       FRS WATCHLIST MANAGEMENT MODAL
+       ════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="frs-modal">
+    <div class="modal modal-lg tactical-modal">
+      <div class="modal-header">
+        <div class="modal-title-stack">
+          <h3>👤 FRS Watchlist & Biometric Targets</h3>
+          <span class="modal-sub">INTELLIGENCE BUREAU & SSB FRONTIER SUSPECT REGISTRY</span>
+        </div>
+        <div class="modal-header-actions">
+          <button class="btn btn-danger btn-sm" onclick="triggerSimulatedFRS()" title="Test positive biometric face match detection">
+            ⚡ SIMULATE MATCH HIT
+          </button>
+          <button class="modal-close" onclick="closeModal('frs-modal')">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="frs-grid-layout">
+          <!-- Watchlist Table / Cards -->
+          <div class="frs-list-col">
+            <div class="frs-col-header">
+              <h4>ACTIVE TARGETS (<span id="frs-target-count">0</span>)</h4>
+              <input type="text" id="frs-search-input" placeholder="Search target name or alias..." oninput="filterWatchlist()">
+            </div>
+            <div id="frs-target-list" class="frs-cards-container">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+
+          <!-- Enroll New Target Form -->
+          <div class="frs-enroll-col">
+            <div class="frs-col-header">
+              <h4>➕ ENROLL NEW BIOMETRIC TARGET</h4>
+            </div>
+            <form id="frs-enroll-form" onsubmit="handleEnrollTarget(event)">
+              <div class="form-group">
+                <label for="target-name">Target Full Name & Aliases</label>
+                <input type="text" id="target-name" required placeholder="e.g. Aslam Khan @ Kalia">
+              </div>
+              <div class="form-row-2">
+                <div class="form-group">
+                  <label for="target-category">Category</label>
+                  <select id="target-category" required>
+                    <option value="Cross-Border Infiltrator">Cross-Border Infiltrator</option>
+                    <option value="Arms Trafficker">Arms Trafficker</option>
+                    <option value="Contraband Courier">Contraband Courier</option>
+                    <option value="Terror Suspect">Terror Suspect</option>
+                    <option value="Authorized Personnel">Authorized Personnel (SSB)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="target-danger">Danger Level</label>
+                  <select id="target-danger" required>
+                    <option value="CRITICAL">CRITICAL (RED ALERT)</option>
+                    <option value="HIGH">HIGH (ELEVATED)</option>
+                    <option value="WATCH">WATCHLIST (CYAN)</option>
+                    <option value="AUTHORIZED">AUTHORIZED (GREEN)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="target-photo">Photo URL (or preset avatar)</label>
+                <input type="text" id="target-photo" placeholder="https://... or leave empty for biometric silhouette">
+              </div>
+              <div class="form-group">
+                <label for="target-notes">Operational Notes & Modus Operandi</label>
+                <textarea id="target-notes" rows="2" placeholder="e.g. Operates around Pillar 442, night-time riverine crossing."></textarea>
+              </div>
+              <button type="submit" class="btn btn-primary btn-block">ENROLL TARGET INTO FRS</button>
+            </form>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('frs-modal')">CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       ANPR VEHICLE SCANNER & HOTLIST MODAL
+       ════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="anpr-modal">
+    <div class="modal modal-lg tactical-modal">
+      <div class="modal-header">
+        <div class="modal-title-stack">
+          <h3>🚗 ANPR Automated Vehicle Scanner & Hotlist</h3>
+          <span class="modal-sub">CHECKPOST LICENSE PLATE INTERCEPT ENGINE</span>
+        </div>
+        <div class="modal-header-actions">
+          <button class="btn btn-danger btn-sm" onclick="triggerSimulatedANPR()" title="Simulate hotlisted plate detection">
+            ⚡ SIMULATE HOTLIST HIT
+          </button>
+          <button class="modal-close" onclick="closeModal('anpr-modal')">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="anpr-grid-layout">
+          <!-- Recent Scans Stream -->
+          <div class="anpr-scans-col">
+            <div class="frs-col-header">
+              <h4>LIVE PLATE SCANS</h4>
+              <input type="text" id="plate-search-input" placeholder="Search license plate..." oninput="filterPlates()">
+            </div>
+            <div id="anpr-scans-list" class="anpr-scans-container">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+
+          <!-- Hotlist & Add Form -->
+          <div class="anpr-hotlist-col">
+            <div class="frs-col-header">
+              <h4>BLACKLISTED VEHICLE HOTLIST (<span id="anpr-hotlist-count">0</span>)</h4>
+            </div>
+            <div id="anpr-hotlist-items" class="anpr-hotlist-container">
+              <!-- Hotlist items -->
+            </div>
+
+            <div class="hotlist-form-block">
+              <h5>➕ FLAG NEW VEHICLE TO HOTLIST</h5>
+              <form id="anpr-hotlist-form" onsubmit="handleAddToHotlist(event)">
+                <div class="form-row-2">
+                  <div class="form-group">
+                    <label for="plate-no">License Plate No.</label>
+                    <input type="text" id="plate-no" required placeholder="e.g. UP 53 AZ 4421" style="text-transform:uppercase;">
+                  </div>
+                  <div class="form-group">
+                    <label for="plate-model">Vehicle Make / Model</label>
+                    <input type="text" id="plate-model" required placeholder="e.g. White Mahindra Bolero">
+                  </div>
+                </div>
+                <div class="form-row-2">
+                  <div class="form-group">
+                    <label for="plate-reason">Interception Reason</label>
+                    <input type="text" id="plate-reason" required placeholder="e.g. Smuggling / Fake Currency Courier">
+                  </div>
+                  <div class="form-group">
+                    <label for="plate-danger">Danger Level</label>
+                    <select id="plate-danger" required>
+                      <option value="CRITICAL">CRITICAL (RED ALERT)</option>
+                      <option value="HIGH">HIGH PRIORITY</option>
+                      <option value="WATCH">SURVEILLANCE WATCH</option>
+                    </select>
+                  </div>
+                </div>
+                <button type="submit" class="btn btn-danger btn-block">ADD VEHICLE TO HOTLIST</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('anpr-modal')">CLOSE</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ════════════════════════════════════════════════════════
        ADD CAMERA MODAL
@@ -175,7 +519,7 @@
       <div class="modal-body">
         <div class="form-group">
           <label for="cam-name">Camera Name</label>
-          <input type="text" id="cam-name" placeholder="e.g. BOP-17 Main Gate">
+          <input type="text" id="cam-name" placeholder="e.g. BOP-17 Highland Perimeter">
         </div>
         <div class="form-group">
           <label for="cam-source">Video / Stream Source</label>
@@ -183,8 +527,8 @@
           <p class="form-hint">Examples: https://www.youtube.com/watch?v=sKcmQQqzQcM • rtsp://192.168.1.100:554/live • D:\videos\border.mp4 • 0 (webcam)</p>
         </div>
         <div class="form-group">
-          <label for="cam-location">Location (Optional)</label>
-          <input type="text" id="cam-location" placeholder="e.g. Sector 12, Indo-Nepal Border">
+          <label for="cam-location">Location / Sector</label>
+          <input type="text" id="cam-location" placeholder="e.g. Sector IV, Indo-Nepal Border BOP-17">
         </div>
 
         <!-- Demo video quick-add -->
@@ -201,7 +545,7 @@
   </div>
 
   <!-- ════════════════════════════════════════════════════════
-       FENCE EDITOR MODAL
+       VIRTUAL FENCE EDITOR MODAL
        ════════════════════════════════════════════════════════ -->
   <div class="modal-overlay" id="fence-modal">
     <div class="modal fence-editor">
@@ -237,13 +581,9 @@
        ════════════════════════════════════════════════════════ -->
   <div id="toast-container"></div>
 
-  <!-- ════════════════════════════════════════════════════════
-       AUDIO (alert sound)
-       ════════════════════════════════════════════════════════ -->
-  <audio id="alert-sound" preload="auto">
-    <!-- Base64-encoded short beep (fallback) — real file can replace this -->
-  </audio>
-
+  <!-- Leaflet GIS Map JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  
   <script src="js/app.js"></script>
 </body>
 </html>
