@@ -520,6 +520,26 @@ async function deleteCamera(camId) {
   await loadCameras();
 }
 
+async function clearAllCameras() {
+  if (!confirm('Clear all cameras from the dashboard?')) return;
+  try {
+    await fetch(`${API_BASE}/api/cameras`, { method: 'DELETE' });
+    showToast({ severity: 'low', message: 'All cameras cleared from surveillance grid' });
+    await loadCameras();
+  } catch (e) {
+    alert('Failed to clear cameras: ' + e.message);
+  }
+}
+
+function handleStreamError(img, camId) {
+  console.warn(`[Stream] Reconnecting camera ${camId}...`);
+  if (img._retryCount && img._retryCount > 15) return;
+  img._retryCount = (img._retryCount || 0) + 1;
+  setTimeout(() => {
+    img.src = `${API_BASE}/api/cameras/${camId}/stream?t=${Date.now()}`;
+  }, 1500);
+}
+
 async function toggleNightMode(camId, enabled) {
   await fetch(`${API_BASE}/api/cameras/${camId}/night-mode`, {
     method: 'POST',

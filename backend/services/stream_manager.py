@@ -195,22 +195,61 @@ class StreamManager:
     def generate_mjpeg(self, camera_id: str):
         """Yields MJPEG frames for StreamingResponse."""
         cam = self.cameras.get(camera_id)
+        if not cam:
+            return
+
+        wait_count = 0
         while cam and cam.running:
             with cam.frame_lock:
                 frame = cam.latest_frame
-            if frame is not None:
-                ok, buffer = cv2.imencode(
-                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75]
-                )
-                if ok:
-                    data = buffer.tobytes()
-                    yield (
-                        b"--frame\r\n"
-                        b"Content-Type: image/jpeg\r\n"
-                        b"Content-Length: " + str(len(data)).encode() + b"\r\n\r\n"
-                        + data
-                        + b"\r\n"
+            if frame is None:
+                # Send immediate buffer frame so browser HTTP request completes and renders
+                wait_count += 1
+                if wait_count % 5 == 1:
+                    placeholder = np.zeros((FRAME_HEIGHT, FRAME_WIDTH, 3), dtype=np.uint8)
+                    cv2.putText(
+                        placeholder,
+                        "CONNECTING LIVE STREAM...",
+                        (FRAME_WIDTH // 2 - 160, FRAME_HEIGHT // 2),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (0, 255, 136),
+                        2,
                     )
+                    cv2.putText(
+                        placeholder,
+                        "Initializing YOLO26 Analytics Engine...",
+                        (FRAME_WIDTH // 2 - 180, FRAME_HEIGHT // 2 + 35),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (150, 180, 200),
+                        1,
+                    )
+                    ok, buffer = cv2.imencode(".jpg", placeholder, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    if ok:
+                        data = buffer.tobytes()
+                        yield (
+                            b"--frame\r\n"
+                            b"Content-Type: image/jpeg\r\n"
+                            b"Content-Length: " + str(len(data)).encode() + b"\r\n\r\n"
+                            + data
+                            + b"\r\n"
+                        )
+                time.sleep(0.1)
+                continue
+
+            ok, buffer = cv2.imencode(
+                ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75]
+            )
+            if ok:
+                data = buffer.tobytes()
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    b"Content-Length: " + str(len(data)).encode() + b"\r\n\r\n"
+                    + data
+                    + b"\r\n"
+                )
             time.sleep(1 / TARGET_FPS)
 
     # ── Main processing loop (runs in a thread per camera) ──────

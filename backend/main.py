@@ -270,6 +270,14 @@ async def stop_camera(camera_id: str):
     return {"status": "stopped"}
 
 
+@app.delete("/api/cameras")
+async def clear_all_cameras():
+    stream_manager.stop_all()
+    stream_manager.cameras.clear()
+    db.clear_all_cameras()
+    return {"status": "all_cleared"}
+
+
 @app.delete("/api/cameras/{camera_id}")
 async def delete_camera(camera_id: str):
     stream_manager.remove_camera(camera_id)

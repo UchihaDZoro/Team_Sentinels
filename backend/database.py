@@ -109,6 +109,12 @@ class Database:
         c.execute("DELETE FROM cameras WHERE id=?", (cam_id,))
         c.commit()
 
+    def clear_all_cameras(self):
+        c = self._conn()
+        c.execute("DELETE FROM alerts")
+        c.execute("DELETE FROM cameras")
+        c.commit()
+
     # ── Alert CRUD ──────────────────────────────────────────────
     def add_alert(
         self,

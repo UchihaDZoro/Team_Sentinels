@@ -47,7 +47,10 @@
     <section id="camera-section">
       <div class="camera-toolbar">
         <h2>📡 SURVEILLANCE FEEDS</h2>
-        <div class="header-controls">
+        <div class="header-controls" style="display:flex; gap:8px;">
+          <button class="btn btn-secondary btn-sm" id="clear-all-cameras-btn" onclick="clearAllCameras()" title="Clean all cameras from grid">
+            🧹 CLEAR ALL
+          </button>
           <button class="btn btn-primary btn-sm" id="add-camera-btn" title="Add Camera">
             ＋ ADD CAMERA
           </button>
