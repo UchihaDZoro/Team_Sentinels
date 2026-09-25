@@ -9,10 +9,10 @@
 
 IBVAP is an AI-driven software platform that transforms existing CCTV infrastructure into an intelligent surveillance network — **without requiring dedicated FRS, ANPR, or smart-camera hardware**.
 
-The platform ingests live video streams from standard IP-based CCTV cameras and performs real-time video analytics using YOLOv8 Computer Vision, delivering:
+The platform ingests live video streams from standard IP-based CCTV cameras and performs real-time video analytics using state-of-the-art **YOLO26** (NMS-free end-to-end Computer Vision), delivering:
 
-- 👥 **Human Detection & Tracking** — Real-time person detection with multi-object tracking
-- 🚗 **Vehicle Detection & Classification** — Cars, trucks, bikes, buses with tracking IDs
+- 👥 **Human Detection & Tracking** — Real-time person detection with multi-object tracking (Green bounding box)
+- 🚗 **Vehicle Detection & Classification** — Cars, trucks, bikes, buses with tracking IDs (Yellow bounding box)
 - 🔲 **Virtual Fence / Intrusion Detection** — Draw restricted zones, get instant alerts
 - 🌙 **Night-time Enhancement** — CLAHE-based low-light processing without IR cameras
 - 🚨 **Real-time Alert Generation** — WebSocket push alerts with sound notifications
@@ -29,8 +29,8 @@ CCTV Camera (RTSP/File/Webcam)
 │         │                   │
 │    Night Enhancement ◄──────┤ (auto-detect dark frames)
 │         │                   │
-│   YOLOv8 Detection          │
-│   + BoT-SORT Tracking       │
+│   YOLO26 Detection          │
+│   + ByteTrack Tracking      │
 │         │                   │
 │   Virtual Fence Check ──────┤──► Alert Engine ──► WebSocket Push
 │         │                   │         │

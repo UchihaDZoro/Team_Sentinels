@@ -21,7 +21,7 @@ for d in [DATA_DIR, SNAPSHOTS_DIR, DEMO_VIDEOS_DIR]:
 DATABASE_PATH = str(DATA_DIR / "ibvap.db")
 
 # ── Detection ───────────────────────────────────────────────────
-YOLO_MODEL = os.getenv("YOLO_MODEL", "yolov8n.pt")
+YOLO_MODEL = os.getenv("YOLO_MODEL", "yolo26n.pt")
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.35"))
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.45"))
 
