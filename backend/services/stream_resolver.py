@@ -67,6 +67,7 @@ def _resolve_with_ytdlp(url: str) -> Tuple[str, Dict[str, Any]]:
         "no_warnings": True,
         "noplaylist": True,
         "socket_timeout": 10,
+        "live_from_start": False,
     }
 
     try:
@@ -88,21 +89,27 @@ def _resolve_with_ytdlp(url: str) -> Tuple[str, Dict[str, Any]]:
             stream_url = None
 
             if is_live:
-                # For live streams, pick 720p or 480p for high-speed AI processing
+                # For live streams, pick 480p or closest to 480p for low network latency
                 if formats:
-                    # Sort by closeness to 720p
-                    formats.sort(key=lambda x: abs((x.get("height") or 0) - 720))
+                    formats.sort(key=lambda x: abs((x.get("height") or 0) - 480))
                     stream_url = formats[0].get("url")
             else:
-                # For recorded videos: prefer MP4 or webm <= 1080p
+                # For recorded videos: prefer direct progressive MP4/webm without HLS
                 if formats:
-                    suitable = [f for f in formats if (f.get("height") or 0) <= 1080]
-                    if suitable:
-                        # Prefer 720p or 1080p
-                        suitable.sort(key=lambda x: x.get("height") or 0, reverse=True)
-                        stream_url = suitable[0].get("url")
+                    direct_formats = [
+                        f for f in formats 
+                        if f.get("protocol") in ("https", "http") and (f.get("height") or 0) <= 1080
+                    ]
+                    if direct_formats:
+                        direct_formats.sort(key=lambda x: x.get("height") or 0, reverse=True)
+                        stream_url = direct_formats[0].get("url")
                     else:
-                        stream_url = formats[-1].get("url")
+                        suitable = [f for f in formats if (f.get("height") or 0) <= 1080]
+                        if suitable:
+                            suitable.sort(key=lambda x: abs((x.get("height") or 0) - 720))
+                            stream_url = suitable[0].get("url")
+                        else:
+                            stream_url = formats[-1].get("url")
 
             # Fallback to direct url or requested_formats if not found
             if not stream_url:

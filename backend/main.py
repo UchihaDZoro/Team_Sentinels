@@ -9,6 +9,12 @@ import asyncio
 import json
 import uuid
 import os
+
+# Configure FFmpeg low-delay and auto-reconnect flags
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+    "reconnect;1|reconnect_streamed;1|reconnect_delay_max;5|fflags;nobuffer|flags;low_delay|analyzeduration;1000000|probesize;1000000"
+)
+
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +26,7 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from config import DATABASE_PATH, FRONTEND_DIR, SNAPSHOTS_DIR, DEMO_VIDEOS_DIR
+from config import DATABASE_PATH, FRONTEND_DIR, SNAPSHOTS_DIR, EVENTS_DIR, DEMO_VIDEOS_DIR
 from database import Database
 from services.detector import ObjectDetector
 from services.virtual_fence import VirtualFence
@@ -62,21 +68,37 @@ async def lifespan(app: FastAPI):
     alert_engine = AlertEngine(db)
 
     stream_manager = StreamManager(detector, fence, alert_engine, night_enhancer, db)
+    alert_engine.stream_manager = stream_manager
 
-    # Get the running event loop and wire alert push
+    # Get the running event loop and wire alert, ANPR, and AI metadata push
     running_loop = asyncio.get_running_loop()
     alert_engine.on_new_alert = lambda a: asyncio.run_coroutine_threadsafe(
         broadcast_alert(a), running_loop
     )
+    if stream_manager and stream_manager.anpr_engine:
+        stream_manager.anpr_engine.on_plate_captured = lambda p: asyncio.run_coroutine_threadsafe(
+            broadcast_plate(p), running_loop
+        )
+    if stream_manager:
+        stream_manager.on_ai_metadata = lambda m: asyncio.run_coroutine_threadsafe(
+            broadcast_ai_metadata(m), running_loop
+        )
 
     # Start background stats broadcaster
     stats_task = asyncio.create_task(broadcast_stats())
 
-    # Auto-start cameras that were previously active
-    for cam in db.list_cameras():
-        stream_manager.add_camera(cam["id"], cam["source"])
-        if cam["status"] == "active":
-            stream_manager.start_camera(cam["id"])
+    # Auto-start cameras that were previously active in a non-blocking thread
+    import threading
+    def _auto_start_cams():
+        for cam in db.list_cameras():
+            stream_manager.add_camera(cam["id"], cam["source"])
+            if cam["status"] == "active":
+                try:
+                    stream_manager.start_camera(cam["id"])
+                except Exception as e:
+                    print(f"[IBVAP] Auto-start error on {cam['id']}: {e}")
+
+    threading.Thread(target=_auto_start_cams, daemon=True, name="CamAutoStarter").start()
 
     print("[IBVAP] System ready ✓")
     print(f"[IBVAP] Dashboard → http://localhost:8000")
@@ -106,8 +128,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve snapshots
+# Serve snapshots and structured evidence vault
 app.mount("/snapshots", StaticFiles(directory=str(SNAPSHOTS_DIR)), name="snapshots")
+app.mount("/api/snapshots", StaticFiles(directory=str(SNAPSHOTS_DIR)), name="api_snapshots")
+app.mount("/api/events", StaticFiles(directory=str(EVENTS_DIR)), name="api_events")
+app.mount("/events", StaticFiles(directory=str(EVENTS_DIR)), name="events")
 
 
 
@@ -144,20 +169,63 @@ async def broadcast_alert(alert: dict):
     ws_clients -= dead
 
 
+async def broadcast_plate(plate: dict):
+    """Push newly captured license plate photo and details to all connected WebSocket clients."""
+    message = json.dumps({"type": "plate_detected", "data": plate})
+    dead = set()
+    for ws in list(ws_clients):
+        try:
+            await ws.send_text(message)
+        except Exception:
+            dead.add(ws)
+    ws_clients.difference_update(dead)
+
+
+async def broadcast_ai_metadata(meta: dict):
+    """Push real-time AI detections and bounding boxes to WebSocket clients."""
+    message = json.dumps({"type": "ai_metadata", "data": meta})
+    dead = set()
+    for ws in list(ws_clients):
+        try:
+            await ws.send_text(message)
+        except Exception:
+            dead.add(ws)
+    ws_clients.difference_update(dead)
+
+
 async def broadcast_stats():
-    """Periodically push stats to all WebSocket clients."""
+    """Periodically push stats and real-time observability telemetry to all WebSocket clients."""
     while True:
         if ws_clients and stream_manager:
-            stats = stream_manager.get_stats()
-            message = json.dumps({"type": "stats", "data": stats})
-            dead = set()
-            for ws in ws_clients:
-                try:
-                    await ws.send_text(message)
-                except Exception:
-                    dead.add(ws)
-            ws_clients -= dead
+            try:
+                stats = stream_manager.get_stats()
+                telemetry = stream_manager.get_telemetry()
+                message = json.dumps({
+                    "type": "stats",
+                    "data": stats,
+                    "telemetry": telemetry,
+                })
+                dead = set()
+                for ws in list(ws_clients):
+                    try:
+                        await ws.send_text(message)
+                    except Exception:
+                        dead.add(ws)
+                ws_clients.difference_update(dead)
+            except Exception as e:
+                print(f"[WS Stats Error] {e}")
         await asyncio.sleep(1)
+
+
+@app.get("/api/stats")
+async def get_stats():
+    """Fetch current aggregate detection metrics and camera telemetry."""
+    if not stream_manager:
+        return {"total_persons": 0, "total_vehicles": 0, "total_threats": 0, "cameras": {}}
+    return {
+        "stats": stream_manager.get_stats(),
+        "telemetry": stream_manager.get_telemetry(),
+    }
 
 
 @app.websocket("/ws")
@@ -165,19 +233,57 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     ws_clients.add(websocket)
     print(f"[WS] Client connected ({len(ws_clients)} total)")
+    if stream_manager:
+        try:
+            stats = stream_manager.get_stats()
+            telemetry = stream_manager.get_telemetry()
+            await websocket.send_text(json.dumps({
+                "type": "stats",
+                "data": stats,
+                "telemetry": telemetry,
+            }))
+        except Exception:
+            pass
     try:
         while True:
-            # Keep connection alive; handle client messages if needed
             data = await websocket.receive_text()
-            msg = json.loads(data)
-            # Handle client commands
-            if msg.get("type") == "ping":
-                await websocket.send_text(json.dumps({"type": "pong"}))
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong"}))
+            except Exception:
+                pass
     except WebSocketDisconnect:
         ws_clients.discard(websocket)
         print(f"[WS] Client disconnected ({len(ws_clients)} total)")
     except Exception:
         ws_clients.discard(websocket)
+
+
+@app.websocket("/ws/stream/{camera_id}")
+async def websocket_camera_stream(websocket: WebSocket, camera_id: str):
+    """
+    Ultra-low latency WebSocket binary frame endpoint.
+    Sends raw pre-encoded JPEG bytes of newest frame directly over WebSocket,
+    bypassing HTTP chunked multipart buffering in browsers.
+    """
+    await websocket.accept()
+    cam = stream_manager.cameras.get(camera_id) if stream_manager else None
+    if not cam:
+        await websocket.close(code=1008, reason="Camera not found or inactive")
+        return
+
+    last_sent_id = -1
+    try:
+        while cam.running:
+            jpeg_bytes, stream_age_ms, frame_id = stream_manager.get_latest_jpeg(camera_id)
+            if jpeg_bytes is not None and frame_id != last_sent_id:
+                last_sent_id = frame_id
+                await websocket.send_bytes(jpeg_bytes)
+            await asyncio.sleep(0.015)
+    except (WebSocketDisconnect, Exception):
+        pass
+
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -245,6 +351,9 @@ async def list_cameras():
                 "fps": round(cs.fps, 1),
                 "persons": cs.person_count,
                 "vehicles": cs.vehicle_count,
+                "threats": getattr(cs, "threat_count", 0),
+                "crowds": getattr(cs, "crowd_count", 0),
+                "plates": getattr(cs, "plate_count", 0),
                 "intrusions": cs.intrusion_count,
                 "running": cs.running,
             }
@@ -312,14 +421,14 @@ async def get_fence(camera_id: str):
 # REST API — Video Stream (MJPEG)
 # ═══════════════════════════════════════════════════════════════
 @app.get("/api/cameras/{camera_id}/stream")
-async def camera_stream(camera_id: str):
-    """MJPEG streaming endpoint for a camera."""
+async def camera_stream(camera_id: str, annotated: bool = Query(True)):
+    """MJPEG streaming endpoint for a camera (with real-time baked detection annotations)."""
     cam = stream_manager.cameras.get(camera_id)
     if not cam or not cam.running:
         raise HTTPException(404, "Camera not active")
 
     return StreamingResponse(
-        stream_manager.generate_mjpeg(camera_id),
+        stream_manager.generate_mjpeg(camera_id, annotated=annotated),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
@@ -354,8 +463,96 @@ async def clear_alerts(camera_id: Optional[str] = None):
 
 
 # ═══════════════════════════════════════════════════════════════
+# REST API — ANPR License Plates
+# ═══════════════════════════════════════════════════════════════
+@app.get("/api/license-plates")
+async def list_license_plates(
+    limit: int = Query(100, ge=1, le=500),
+    camera_id: Optional[str] = None,
+    search: Optional[str] = None,
+):
+    return {"plates": db.list_license_plates(limit=limit, camera_id=camera_id, search=search)}
+
+
+@app.get("/api/recent-plates")
+async def get_recent_plates():
+    """Retrieve recently recognized license plates with photo snapshots."""
+    plates = stream_manager.anpr_engine.captured_plates if (stream_manager and stream_manager.anpr_engine) else []
+    return {"plates": plates}
+
+
+@app.delete("/api/license-plates")
+async def clear_license_plates(camera_id: Optional[str] = None):
+    db.clear_license_plates(camera_id)
+    return {"status": "cleared"}
+
+
+# ═══════════════════════════════════════════════════════════════
+# REST API — Telemetry & Observability
+# ═══════════════════════════════════════════════════════════════
+@app.get("/api/telemetry")
+async def get_telemetry():
+    """Expose real-time system and camera pipeline observability telemetry."""
+    if not stream_manager:
+        raise HTTPException(status_code=503, detail="Stream manager not initialized")
+    return JSONResponse(stream_manager.get_telemetry())
+
+
+@app.get("/api/evidence")
+async def list_evidence(limit: int = 30):
+    """
+    List structured multi-crop evidence folders archived under EVENTS_DIR.
+    Each entry includes metadata, URLs to full_frame.jpg, vehicle.jpg/object_crop.jpg, plate.jpg, and clip.mp4.
+    """
+    results = []
+    try:
+        if EVENTS_DIR.exists():
+            for cam_dir in sorted(EVENTS_DIR.iterdir(), reverse=True):
+                if not cam_dir.is_dir():
+                    continue
+                for date_dir in sorted(cam_dir.iterdir(), reverse=True):
+                    if not date_dir.is_dir():
+                        continue
+                    for ev_dir in sorted(date_dir.iterdir(), reverse=True):
+                        if not ev_dir.is_dir():
+                            continue
+                        rel_path = f"{cam_dir.name}/{date_dir.name}/{ev_dir.name}"
+                        meta_file = ev_dir / "metadata.json"
+                        meta = {}
+                        if meta_file.exists():
+                            try:
+                                with open(meta_file, "r") as mf:
+                                    meta = json.load(mf)
+                            except Exception:
+                                pass
+
+                        entry = {
+                            "event_dir": ev_dir.name,
+                            "camera_id": cam_dir.name,
+                            "date": date_dir.name,
+                            "metadata": meta,
+                            "full_frame_url": f"/api/events/{rel_path}/full_frame.jpg" if (ev_dir / "full_frame.jpg").exists() else None,
+                            "vehicle_url": f"/api/events/{rel_path}/vehicle.jpg" if (ev_dir / "vehicle.jpg").exists() else None,
+                            "object_crop_url": f"/api/events/{rel_path}/object_crop.jpg" if (ev_dir / "object_crop.jpg").exists() else None,
+                            "plate_url": f"/api/events/{rel_path}/plate.jpg" if (ev_dir / "plate.jpg").exists() else None,
+                            "clip_url": f"/api/events/{rel_path}/incident_clip.mp4" if (ev_dir / "incident_clip.mp4").exists() else None,
+                        }
+                        results.append(entry)
+                        if len(results) >= limit:
+                            break
+                    if len(results) >= limit:
+                        break
+                if len(results) >= limit:
+                    break
+    except Exception as e:
+        print(f"[IBVAP API] Evidence listing notice: {e}")
+    return {"evidence": results}
+
+
+# ═══════════════════════════════════════════════════════════════
 # REST API — Analytics
 # ═══════════════════════════════════════════════════════════════
+
 @app.get("/api/analytics")
 async def get_analytics():
     return {

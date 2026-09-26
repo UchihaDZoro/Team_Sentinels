@@ -53,8 +53,23 @@ class Database:
                 FOREIGN KEY (camera_id) REFERENCES cameras(id)
             );
 
+            CREATE TABLE IF NOT EXISTS license_plates (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                camera_id        TEXT NOT NULL,
+                vehicle_track_id INTEGER DEFAULT -1,
+                plate_number     TEXT NOT NULL,
+                confidence       REAL DEFAULT 0.0,
+                vehicle_type     TEXT DEFAULT 'vehicle',
+                snapshot_path    TEXT DEFAULT '',
+                created_at       TEXT DEFAULT (datetime('now','localtime')),
+                FOREIGN KEY (camera_id) REFERENCES cameras(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_alerts_camera  ON alerts(camera_id);
-            CREATE INDEX IF NOT EXISTS idx_alerts_created  ON alerts(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_lp_camera      ON license_plates(camera_id);
+            CREATE INDEX IF NOT EXISTS idx_lp_created     ON license_plates(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_lp_number      ON license_plates(plate_number);
         """)
         conn.commit()
         conn.close()
@@ -176,3 +191,62 @@ class Database:
                ORDER BY hour""" % hours
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ── License Plate CRUD ──────────────────────────────────────
+    def add_license_plate(
+        self,
+        camera_id: str,
+        vehicle_track_id: int = -1,
+        plate_number: str = "",
+        confidence: float = 0.0,
+        vehicle_type: str = "vehicle",
+        snapshot_path: str = "",
+        photo_path: str = "",
+    ) -> dict:
+        """Record a recognized license plate, deduplicating recent identical plates for the same track."""
+        if not snapshot_path and photo_path:
+            snapshot_path = photo_path
+        c = self._conn()
+        # Avoid spamming duplicates within 30 seconds for same vehicle
+        existing = c.execute(
+            """SELECT id FROM license_plates 
+               WHERE camera_id=? AND plate_number=? 
+               AND created_at >= datetime('now', 'localtime', '-30 seconds')""",
+            (camera_id, plate_number),
+        ).fetchone()
+        if existing:
+            return {"id": existing[0], "status": "duplicate_suppressed"}
+
+        c.execute(
+            """INSERT INTO license_plates (camera_id, vehicle_track_id, plate_number, confidence, vehicle_type, snapshot_path)
+               VALUES (?,?,?,?,?,?)""",
+            (camera_id, vehicle_track_id, plate_number, float(confidence), vehicle_type, snapshot_path),
+        )
+        c.commit()
+        lp_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+        row = c.execute("SELECT * FROM license_plates WHERE id=?", (lp_id,)).fetchone()
+        return dict(row)
+
+    def list_license_plates(self, limit: int = 100, camera_id: str | None = None, search: str | None = None) -> list[dict]:
+        c = self._conn()
+        query = "SELECT * FROM license_plates WHERE 1=1"
+        params = []
+        if camera_id:
+            query += " AND camera_id=?"
+            params.append(camera_id)
+        if search:
+            query += " AND plate_number LIKE ?"
+            params.append(f"%{search}%")
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = c.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def clear_license_plates(self, camera_id: str | None = None):
+        c = self._conn()
+        if camera_id:
+            c.execute("DELETE FROM license_plates WHERE camera_id=?", (camera_id,))
+        else:
+            c.execute("DELETE FROM license_plates")
+        c.commit()
+

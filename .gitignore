@@ -34,3 +34,10 @@ Thumbs.db
 # Agent/IDE local configs
 .agents/
 .gemini/
+
+# Reference Repositories
+ref_repos/
+
+# Runtime evidence clips
+backend/data/events/
+backend/data/snapshots/

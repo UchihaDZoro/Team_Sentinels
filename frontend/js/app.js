@@ -95,6 +95,7 @@ function connectWebSocket() {
       const msg = JSON.parse(event.data);
       if (msg.type === 'alert') handleNewAlert(msg.data);
       if (msg.type === 'stats') handleStats(msg.data);
+      if (msg.type === 'plate_detected') handlePlateDetected(msg.data);
     } catch (e) { console.error('[WS] Parse error:', e); }
   };
 
@@ -148,6 +149,92 @@ function handleStats(stats) {
       card.classList.remove('intrusion');
     }
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Handle real-time plate detection (10-second side callout)
+// ═══════════════════════════════════════════════════════════════
+function handlePlateDetected(plate) {
+  if (!plate || !plate.camera_id) return;
+
+  const card = document.querySelector(`.camera-card[data-cam-id="${plate.camera_id}"]`);
+  if (!card) return;
+
+  const feed = card.querySelector('.camera-feed');
+  if (!feed) return;
+
+  // Remove existing callout if present
+  const existing = feed.querySelector('.plate-side-callout');
+  if (existing) {
+    if (existing._timer) clearInterval(existing._timer);
+    existing.remove();
+  }
+
+  const callout = document.createElement('div');
+  callout.className = 'plate-side-callout';
+  callout.style.cssText = `
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 25;
+    width: 215px;
+    background: rgba(10, 16, 28, 0.94);
+    border: 2px solid #00e5ff;
+    border-radius: 8px;
+    padding: 8px;
+    box-shadow: 0 6px 24px rgba(0, 229, 255, 0.45);
+    display: flex;
+    flex-direction: column;
+    pointer-events: auto;
+    font-family: var(--font-mono, monospace);
+    transition: opacity 0.35s ease;
+  `;
+
+  const photoSrc = plate.photo_base64 || plate.photo_url || '';
+  const plateText = plate.plate_number || 'PLATE RECOGNIZED';
+  const vehType = plate.vehicle_type || 'Vehicle';
+  const confPct = plate.confidence ? Math.round(plate.confidence * 100) : 90;
+
+  callout.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 10px; font-weight: 700; color: #00e5ff; margin-bottom: 4px;">
+      <span>🏷️ LICENSE PLATE OCR</span>
+      <span class="plate-timer-text" style="color: #00ff88; font-weight: 800;">10.0s</span>
+    </div>
+    <div style="width: 100%; height: 3px; background: rgba(255,255,255,0.15); border-radius: 2px; overflow: hidden; margin-bottom: 6px;">
+      <div class="plate-timer-fill" style="width: 100%; height: 100%; background: #00e5ff; transition: width 0.1s linear;"></div>
+    </div>
+    ${photoSrc ? `<img src="${photoSrc}" style="width: 100%; height: 52px; object-fit: contain; border-radius: 4px; background: #000; border: 1px solid #334e68; display: block;" alt="Plate Crop">` : ''}
+    <div style="font-size: 15px; font-weight: 800; color: #ffff00; text-align: center; margin-top: 4px; letter-spacing: 1.2px;">
+      ${escapeHtml(plateText)}
+    </div>
+    <div style="font-size: 10px; color: #a0aec0; text-align: center; margin-top: 2px;">
+      ${escapeHtml(vehType)} • ${confPct}% Conf
+    </div>
+  `;
+
+  feed.appendChild(callout);
+
+  // 10-second countdown timer
+  const totalMs = 10000;
+  const startTime = Date.now();
+  callout._timer = setInterval(() => {
+    const elapsed = Date.now() - startTime;
+    const remaining = Math.max(0, totalMs - elapsed);
+    const secStr = (remaining / 1000).toFixed(1) + 's';
+    const pct = (remaining / totalMs) * 100;
+
+    const timerText = callout.querySelector('.plate-timer-text');
+    const timerFill = callout.querySelector('.plate-timer-fill');
+
+    if (timerText) timerText.textContent = secStr;
+    if (timerFill) timerFill.style.width = pct + '%';
+
+    if (remaining <= 0) {
+      clearInterval(callout._timer);
+      callout.style.opacity = '0';
+      setTimeout(() => callout.remove(), 350);
+    }
+  }, 100);
 }
 
 // ═══════════════════════════════════════════════════════════════

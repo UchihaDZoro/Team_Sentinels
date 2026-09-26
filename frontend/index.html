@@ -33,6 +33,18 @@
         <span class="stat-value" id="alert-count">0</span>
         <span>ALERTS</span>
       </div>
+      <div class="stat-item" title="Controlled Processing Buffer Delay (Target: ~10.0s stable delay, zero cumulative backlog)">
+        <span class="stat-value" id="header-stream-age" style="color: #00e5ff;">10.0s</span>
+        <span style="font-size: 10px; color: #00e5ff;">BUFFER DELAY</span>
+      </div>
+      <div class="stat-item" title="Live Edge Distance (Distance from real-time live broadcast edge, strictly flat and bounded)">
+        <span class="stat-value" id="header-live-edge" style="color: var(--accent-green);">10.1s</span>
+        <span style="font-size: 10px; color: var(--accent-green);">LIVE-EDGE</span>
+      </div>
+      <div class="stat-item" title="AI Inference Latency">
+        <span class="stat-value" id="header-latency" style="color: #a0aec0;">80ms</span>
+        <span style="font-size: 10px; color: #a0aec0;">AI TIME</span>
+      </div>
       <div class="stat-item">
         <span id="current-time">00:00:00</span>
       </div>
@@ -61,12 +73,13 @@
         <div class="launcher-header">
           <div class="launcher-title">
             <span class="pulse-icon">📡</span>
-            <span>LIVE STREAMS & VIDEO SURVEILLANCE FEED <span style="font-size: 10px; background: rgba(0,255,136,0.15); border: 1px solid var(--accent-green); padding: 2px 6px; border-radius: 4px; margin-left: 6px;">YOLO26 NMS-FREE</span></span>
+            <span>LIVE STREAMS & VIDEO SURVEILLANCE FEED <span style="font-size: 10px; background: rgba(0,255,136,0.15); border: 1px solid var(--accent-green); padding: 2px 6px; border-radius: 4px; margin-left: 6px;">ZERO-LAG BOUNDED</span></span>
           </div>
           <div class="legend-badges">
             <span class="legend-badge legend-human">🟩 HUMANS (GREEN BOX)</span>
             <span class="legend-badge legend-vehicle">🟨 VEHICLES (YELLOW BOX)</span>
-            <span class="legend-badge legend-intrusion">🟥 INTRUSIONS (RED BOX)</span>
+            <span class="legend-badge legend-threat" style="background: rgba(255, 30, 30, 0.2); border: 1px solid #ff2222; color: #ff4444; font-weight: 700;">🟥 WEAPONS & THREATS (RED BOX)</span>
+            <span class="legend-badge legend-intrusion">🚨 INTRUSIONS (RED BOX)</span>
           </div>
         </div>
 
@@ -93,6 +106,15 @@
           <span class="chips-label">QUICK DEMO PRESETS:</span>
           <button class="chip-btn active" type="button" onclick="playYouTubePreset('https://www.youtube.com/watch?v=sKcmQQqzQcM', 'Winter Garden Live Cam (YouTube)')" style="background: rgba(255,51,75,0.15); border-color: #ff334b; color: #ff6b7d; font-weight: 700;">
             🔴 YouTube Live Cam
+          </button>
+          <button class="chip-btn" type="button" onclick="playYouTubePreset('https://www.youtube.com/watch?v=09IFWobinYk', 'APD SWAT Officer Weapons (YouTube)')" style="background: rgba(255,51,75,0.15); border-color: #ff334b; color: #ff6b7d; font-weight: 700;">
+            💥 SWAT Threats / Weapons
+          </button>
+          <button class="chip-btn" type="button" onclick="playDemoPreset('checkpost_vehicles.mp4', 'ANPR Vehicle Plates')" style="background: rgba(0, 229, 255, 0.12); border-color: #00e5ff; color: #00e5ff; font-weight: 700;">
+            🏷️ ANPR Plates
+          </button>
+          <button class="chip-btn" type="button" onclick="playDemoPreset('surveillance_humans_and_cars.mp4', 'Crowd & Pedestrians')" style="background: rgba(255, 179, 0, 0.12); border-color: #ffb300; color: #ffb300; font-weight: 700;">
+            👥👥 Crowd Clusters
           </button>
           <button class="chip-btn" type="button" onclick="playDemoPreset('surveillance_humans_and_cars.mp4', 'Surveillance (Humans & Cars)')">
             👥+🚗 Humans & Cars
@@ -137,6 +159,11 @@
        STATUS BAR
        ════════════════════════════════════════════════════════ -->
   <footer id="status-bar">
+    <div class="status-item danger" style="background: rgba(255, 34, 34, 0.15); border: 1px solid rgba(255, 51, 75, 0.4); border-radius: 4px; padding: 2px 8px;">
+      <span class="status-icon">🚨</span>
+      <span class="status-val" id="total-threats" style="color: #ff334b; font-weight: 800;">0</span>
+      <span style="color: #ff6b7d; font-weight: 700;">THREATS</span>
+    </div>
     <div class="status-item">
       <span class="status-icon">👥</span>
       <span class="status-val" id="total-persons">0</span>
@@ -147,21 +174,46 @@
       <span class="status-val" id="total-vehicles">0</span>
       <span>VEHICLES</span>
     </div>
+    <div class="status-item" style="color: #00e5ff;">
+      <span class="status-icon">🏷️</span>
+      <span class="status-val" id="total-plates" style="color: #00e5ff; font-weight: 700;">0</span>
+      <span>PLATES</span>
+    </div>
+    <div class="status-item" style="color: #ffb300;">
+      <span class="status-icon">👥👥</span>
+      <span class="status-val" id="total-crowds" style="color: #ffb300; font-weight: 700;">0</span>
+      <span>CROWDS</span>
+    </div>
     <div class="status-item danger">
-      <span class="status-icon">🚨</span>
+      <span class="status-icon">⚠️</span>
       <span class="status-val" id="total-intrusions">0</span>
       <span>INTRUSIONS</span>
     </div>
-    <div class="status-item">
+    <div class="status-item" title="Average AI Inference Frame Rate">
       <span class="status-icon">⚡</span>
       <span class="status-val" id="avg-fps">0</span>
       <span>FPS</span>
     </div>
-    <div class="status-item">
-      <span class="status-icon">🟢</span>
-      <span>IBVAP v1.0 — SSB SURVEILLANCE [YOLO26 AI]</span>
+    <div class="status-item" style="color: #00ff88;" title="End-to-End Analytics Latency (Bounded 1-slot buffer guarantees no backlog drift)">
+      <span class="status-icon">⏱️</span>
+      <span class="status-val" id="avg-latency" style="color: #00ff88; font-weight: 700;">0</span>
+      <span>MS (BOUNDED)</span>
+    </div>
+    <div class="status-item" title="Stale frames dropped to preserve real-time edge">
+      <span class="status-icon">🗑️</span>
+      <span class="status-val" id="total-drops" style="color: #8899b0; font-weight: 700;">0</span>
+      <span>DROPPED</span>
+    </div>
+    <div class="status-item" id="system-resource-pill" style="font-family: var(--font-mono); font-size: 11px;">
+      <span class="status-icon">💻</span>
+      <span id="system-resources">CPU: --% | RAM: --GB</span>
+    </div>
+    <div class="status-item" style="background: rgba(0,255,136,0.1); border: 1px solid var(--accent-green); border-radius: 4px; padding: 2px 6px;">
+      <span class="status-icon">🛡️</span>
+      <span style="color: var(--accent-green); font-weight: 700; font-size: 11px;" id="watchdog-status-text">WATCHDOG ACTIVE</span>
     </div>
   </footer>
+
 
   <!-- ════════════════════════════════════════════════════════
        ADD CAMERA MODAL
@@ -231,6 +283,27 @@
       </div>
     </div>
   </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       EVIDENCE DETAILS MODAL
+       ════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="evidence-modal" style="display:none;">
+    <div class="modal evidence-viewer-modal" style="max-width: 820px; width: 95%;">
+      <div class="modal-header">
+        <h3 id="evidence-modal-title">📂 FORENSIC EVIDENCE INSPECTOR</h3>
+        <button class="modal-close" onclick="closeEvidenceModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="evidence-modal-body"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeEvidenceModal()">CLOSE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       ANPR LIVE CAPTURE CONTAINER
+       ════════════════════════════════════════════════════════ -->
+  <div id="anpr-capture-container"></div>
 
   <!-- ════════════════════════════════════════════════════════
        TOAST CONTAINER

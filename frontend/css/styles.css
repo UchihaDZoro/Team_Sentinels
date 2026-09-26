@@ -451,6 +451,17 @@ body::before {
   animation: intrusion-pulse 1.5s ease-in-out infinite;
 }
 
+.camera-card.threat-alert {
+  border-color: #ff1133;
+  box-shadow: 0 0 25px rgba(255, 17, 51, 0.45);
+  animation: threat-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes threat-pulse {
+  0%, 100% { border-color: #ff1133; box-shadow: 0 0 15px rgba(255, 17, 51, 0.3); }
+  50% { border-color: #ff4466; box-shadow: 0 0 30px rgba(255, 17, 51, 0.7); }
+}
+
 .camera-header {
   display: flex;
   align-items: center;
@@ -497,6 +508,20 @@ body::before {
   color: var(--accent-red);
   border: 1px solid rgba(255, 45, 85, 0.2);
 }
+
+.badge-stalled {
+  background: rgba(255, 170, 0, 0.15);
+  color: var(--accent-amber);
+  border: 1px solid rgba(255, 170, 0, 0.4);
+}
+
+.badge-reconnecting {
+  background: rgba(255, 45, 85, 0.2);
+  color: #ff334b;
+  border: 1px solid #ff334b;
+  animation: pulse-badge 0.8s ease-in-out infinite;
+}
+
 
 .camera-feed {
   flex: 1;
@@ -1152,4 +1177,165 @@ body::before {
 @media (max-width: 900px) {
   #alert-sidebar { display: none; }
   .logo-subtitle { display: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ANPR LIVE CAPTURE HUD CARD & NOTIFICATIONS
+   ══════════════════════════════════════════════════════════════ */
+#anpr-capture-container {
+  position: fixed;
+  bottom: calc(var(--statusbar-height) + 16px);
+  right: calc(var(--sidebar-width) + 24px);
+  z-index: 2500;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.anpr-card {
+  pointer-events: auto;
+  width: 360px;
+  background: rgba(10, 18, 28, 0.95);
+  border: 1px solid #00e5ff;
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8), 0 0 25px rgba(0, 229, 255, 0.25);
+  backdrop-filter: blur(12px);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: anpr-card-in 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  font-family: var(--font-mono);
+  position: relative;
+  overflow: hidden;
+}
+
+.anpr-card.exiting {
+  animation: anpr-card-out 0.35s ease-in forwards;
+}
+
+.anpr-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.2);
+  padding-bottom: 6px;
+}
+
+.anpr-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #00e5ff;
+  letter-spacing: 1px;
+}
+
+.anpr-card-close {
+  background: none;
+  border: none;
+  color: #88a;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.anpr-card-close:hover {
+  color: #ff334b;
+}
+
+.anpr-card-body {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.anpr-photo-wrap {
+  width: 130px;
+  height: 64px;
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  border-radius: 4px;
+  background: #000;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.anpr-photo-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  filter: contrast(1.1) brightness(1.05);
+}
+
+.anpr-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.anpr-plate-number {
+  font-size: 18px;
+  font-weight: 800;
+  color: #ffffff;
+  background: rgba(0, 229, 255, 0.15);
+  border: 1px solid #00e5ff;
+  border-radius: 4px;
+  padding: 2px 6px;
+  text-align: center;
+  letter-spacing: 2px;
+  text-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+}
+
+.anpr-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #a0b2c6;
+}
+
+.anpr-veh-badge {
+  background: rgba(255, 230, 0, 0.15);
+  color: #ffe600;
+  border: 1px solid rgba(255, 230, 0, 0.3);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+.anpr-conf-text {
+  color: #00ff88;
+  font-weight: 700;
+}
+
+.anpr-timer-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: #00e5ff;
+  width: 100%;
+  animation: anpr-drain 14s linear forwards;
+}
+
+@keyframes anpr-card-in {
+  from { opacity: 0; transform: translateY(30px) scale(0.92); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes anpr-card-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(30px) scale(0.92); }
+}
+
+@keyframes anpr-drain {
+  from { width: 100%; }
+  to   { width: 0%; }
 }
